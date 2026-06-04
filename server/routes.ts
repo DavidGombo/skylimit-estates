@@ -13,6 +13,22 @@ function parseRows(json: string): RentalRow[] {
 const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
 
 export async function registerRoutes(httpServer: Server, app: Express): Promise<Server> {
+  // ---------- Access gate ----------
+  // Require a shared access key on every /api request. Set ACCESS_KEY in the
+  // deployment environment. If unset (local dev), gate is disabled.
+  const ACCESS_KEY = process.env.ACCESS_KEY;
+  app.get("/api/auth/check", (req, res) => {
+    if (!ACCESS_KEY) return res.json({ ok: true, required: false });
+    const ok = req.headers["x-access-key"] === ACCESS_KEY;
+    res.status(ok ? 200 : 401).json({ ok, required: true });
+  });
+  app.use("/api", (req, res, next) => {
+    if (!ACCESS_KEY) return next();
+    if (req.path === "/auth/check") return next();
+    if (req.headers["x-access-key"] === ACCESS_KEY) return next();
+    return res.status(401).json({ message: "Unauthorized" });
+  });
+
   // ---------- Properties ----------
   app.get("/api/properties", async (_req, res) => res.json(await storage.listProperties()));
   app.get("/api/properties/:id", async (req, res) => {
@@ -49,7 +65,10 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     res.status(201).json(await storage.createTenant(parsed.data));
   });
   app.put("/api/tenants/:id", async (req, res) => {
-    const updated = await storage.updateTenant(Number(req.params.id), req.body);
+    const allowed = (["flat", "tenantName", "monthlyRent", "active"] as const);
+    const patch: Record<string, unknown> = {};
+    for (const k of allowed) if (k in req.body) patch[k] = req.body[k];
+    const updated = await storage.updateTenant(Number(req.params.id), patch);
     if (!updated) return res.status(404).json({ message: "Tenant not found" });
     res.json(updated);
   });

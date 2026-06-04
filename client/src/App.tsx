@@ -5,6 +5,7 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import NotFound from "@/pages/not-found";
+import { AccessGate } from "@/components/AccessGate";
 import Home from "@/pages/Home";
 import PropertyDetail from "@/pages/PropertyDetail";
 import StatementEditor from "@/pages/StatementEditor";
@@ -28,9 +29,11 @@ function App() {
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
         <Toaster />
-        <Router hook={useHashLocation}>
-          <AppRouter />
-        </Router>
+        <AccessGate>
+          <Router hook={useHashLocation}>
+            <AppRouter />
+          </Router>
+        </AccessGate>
       </TooltipProvider>
     </QueryClientProvider>
   );

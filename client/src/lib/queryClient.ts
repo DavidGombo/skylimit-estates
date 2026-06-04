@@ -2,6 +2,14 @@ import { QueryClient, QueryFunction } from "@tanstack/react-query";
 
 const API_BASE = "__PORT_5000__".startsWith("__") ? "" : "__PORT_5000__";
 
+// In-memory access key (sandboxed iframe blocks localStorage). Set on unlock.
+let accessKey = "";
+export function setAccessKey(k: string) { accessKey = k; }
+export function getAccessKey() { return accessKey; }
+function authHeaders(extra: Record<string, string> = {}): Record<string, string> {
+  return accessKey ? { ...extra, "x-access-key": accessKey } : extra;
+}
+
 async function throwIfResNotOk(res: Response) {
   if (!res.ok) {
     const text = (await res.text()) || res.statusText;
@@ -16,7 +24,7 @@ export async function apiRequest(
 ): Promise<Response> {
   const res = await fetch(`${API_BASE}${url}`, {
     method,
-    headers: data ? { "Content-Type": "application/json" } : {},
+    headers: authHeaders(data ? { "Content-Type": "application/json" } : {}),
     body: data ? JSON.stringify(data) : undefined,
   });
 
@@ -30,7 +38,7 @@ export const getQueryFn: <T>(options: {
 }) => QueryFunction<T> =
   ({ on401: unauthorizedBehavior }) =>
   async ({ queryKey }) => {
-    const res = await fetch(`${API_BASE}${queryKey.join("/")}`);
+    const res = await fetch(`${API_BASE}${queryKey.join("/")}`, { headers: authHeaders() });
 
     if (unauthorizedBehavior === "returnNull" && res.status === 401) {
       return null;
