@@ -330,8 +330,8 @@ export default function StatementEditor() {
                 <Select value={feeBase} onValueChange={(v) => setFeeBase(v as FeeBase)}>
                   <SelectTrigger data-testid="select-fee-base"><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="total_income">Total Income</SelectItem>
-                    <SelectItem value="sub_total">Sub Total (Income − Disbursements)</SelectItem>
+                    <SelectItem value="total_income">Rent Collected (Total Income)</SelectItem>
+                    <SelectItem value="sub_total">Sub Total (after disbursements)</SelectItem>
                   </SelectContent>
                 </Select>
                 <p className="text-xs text-muted-foreground">Fee base: {gbp(feeBase === "sub_total" ? totals.subTotal : totals.totalIncome)} × {feePercent}%</p>

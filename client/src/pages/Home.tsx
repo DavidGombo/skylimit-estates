@@ -96,8 +96,8 @@ export default function Home() {
                     <Select value={feeBase} onValueChange={setFeeBase}>
                       <SelectTrigger data-testid="select-new-property-base"><SelectValue /></SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="total_income">Total Income</SelectItem>
-                        <SelectItem value="sub_total">Sub Total</SelectItem>
+                        <SelectItem value="total_income">Rent Collected (Total Income)</SelectItem>
+                        <SelectItem value="sub_total">Sub Total (after disbursements)</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
@@ -149,7 +149,7 @@ export default function Home() {
                     <span className="font-semibold text-foreground truncate" data-testid={`text-property-name-${p.id}`}>{p.propertyAddress}</span>
                   </div>
                   <p className="text-xs text-muted-foreground mt-1 truncate">To {p.statementTo || "—"}</p>
-                  <p className="text-xs text-muted-foreground mt-0.5">Fee {p.managementFeePercent}% on {p.managementFeeBase === "sub_total" ? "Sub Total" : "Total Income"}</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">Fee {p.managementFeePercent}% on {p.managementFeeBase === "sub_total" ? "Sub Total" : "Rent Collected"}</p>
                 </div>
                 <ChevronRight className="h-5 w-5 text-muted-foreground shrink-0 mt-0.5" />
               </button>

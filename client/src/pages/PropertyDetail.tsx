@@ -121,8 +121,8 @@ export default function PropertyDetail() {
                 <Select value={form.managementFeeBase ?? "total_income"} onValueChange={(v) => setForm(f => ({ ...f, managementFeeBase: v }))}>
                   <SelectTrigger data-testid="select-prop-base"><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="total_income">Total Income</SelectItem>
-                    <SelectItem value="sub_total">Sub Total</SelectItem>
+                    <SelectItem value="total_income">Rent Collected (Total Income)</SelectItem>
+                    <SelectItem value="sub_total">Sub Total (after disbursements)</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
