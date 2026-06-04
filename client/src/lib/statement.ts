@@ -54,3 +54,11 @@ export function gbpOrDash(n: number): string {
   if (!n || round2(n) === 0) return "-";
   return gbp(n);
 }
+
+// pounds <-> pence helpers (tenant rent stored in pence)
+export function penceToPounds(pence: number): number {
+  return round2((pence || 0) / 100);
+}
+export function poundsToPence(pounds: number): number {
+  return Math.round((pounds || 0) * 100);
+}

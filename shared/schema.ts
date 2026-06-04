@@ -2,51 +2,95 @@ import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
-// A landlord statement record. Rental rows and disbursement rows are stored
-// as JSON text (SQLite has no array columns) and parsed in app code.
-export const statements = sqliteTable("statements", {
+// ---------------------------------------------------------------------------
+// PROPERTIES — presaved property + landlord + issuer + fee settings
+// ---------------------------------------------------------------------------
+export const properties = sqliteTable("properties", {
   id: integer("id").primaryKey({ autoIncrement: true }),
+  propertyAddress: text("property_address").notNull(),
+  statementTo: text("statement_to").notNull().default(""), // landlord / recipient
+  statementToAddress: text("statement_to_address").notNull().default(""), // landlord address line
+  deliveryMethod: text("delivery_method").notNull().default("By Email"),
 
-  // Issuer (company producing the statement)
+  // Issuer (defaults to Skylimit)
   companyName: text("company_name").notNull().default("Skylimit Estates Limited"),
   companyAddress: text("company_address").notNull().default("45 Stamford Hill, London N16 5SR"),
   companyEmail: text("company_email").notNull().default("dg@skylimitestates.com"),
 
-  // Statement meta
-  statementDate: text("statement_date").notNull(), // e.g. 05/05/2026
-  periodFrom: text("period_from").notNull(), // e.g. 01.04.2026
-  periodTo: text("period_to").notNull(), // e.g. 30.04.2026
-
-  // Recipient
-  propertyAddress: text("property_address").notNull(),
-  statementTo: text("statement_to").notNull(),
-  deliveryMethod: text("delivery_method").notNull().default("By Email"),
-
-  // Line items as JSON text
-  rentalRows: text("rental_rows").notNull().default("[]"),
-  disbursementRows: text("disbursement_rows").notNull().default("[]"),
-
-  // Management fee config
+  // Fee settings remembered per property
   managementFeePercent: integer("management_fee_percent").notNull().default(10),
-  // Base the fee is charged on: "total_income" or "sub_total"
   managementFeeBase: text("management_fee_base").notNull().default("total_income"),
 
-  // Footer note
   footerNote: text("footer_note").notNull().default("We thank you for your custom!"),
 
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
 });
 
-// ---- Row item shapes (validated in the form, stored as JSON) ----
+export const insertPropertySchema = createInsertSchema(properties).omit({
+  id: true, createdAt: true, updatedAt: true,
+});
+export type InsertProperty = z.infer<typeof insertPropertySchema>;
+export type Property = typeof properties.$inferSelect;
+
+// ---------------------------------------------------------------------------
+// TENANTS — presaved per property (flat, name, monthly rent)
+// ---------------------------------------------------------------------------
+export const tenants = sqliteTable("tenants", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  propertyId: integer("property_id").notNull(),
+  flat: text("flat").notNull().default(""),
+  tenantName: text("tenant_name").notNull().default(""),
+  monthlyRent: integer("monthly_rent_pence").notNull().default(0), // stored in pence to avoid float drift
+  active: integer("active").notNull().default(1), // 1 active, 0 archived (tenant left)
+  createdAt: text("created_at").notNull(),
+});
+
+export const insertTenantSchema = createInsertSchema(tenants).omit({
+  id: true, createdAt: true,
+});
+export type InsertTenant = z.infer<typeof insertTenantSchema>;
+export type Tenant = typeof tenants.$inferSelect;
+
+// ---------------------------------------------------------------------------
+// STATEMENTS — a produced statement, snapshotting all values
+// ---------------------------------------------------------------------------
+export const statements = sqliteTable("statements", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  propertyId: integer("property_id"), // link back to property (nullable for legacy)
+
+  // Snapshotted issuer + recipient (so edits to property don't rewrite history)
+  companyName: text("company_name").notNull().default("Skylimit Estates Limited"),
+  companyAddress: text("company_address").notNull().default("45 Stamford Hill, London N16 5SR"),
+  companyEmail: text("company_email").notNull().default("dg@skylimitestates.com"),
+  statementDate: text("statement_date").notNull(),
+  periodFrom: text("period_from").notNull(),
+  periodTo: text("period_to").notNull(),
+  propertyAddress: text("property_address").notNull(),
+  statementTo: text("statement_to").notNull(),
+  statementToAddress: text("statement_to_address").notNull().default(""),
+  deliveryMethod: text("delivery_method").notNull().default("By Email"),
+
+  rentalRows: text("rental_rows").notNull().default("[]"),
+  disbursementRows: text("disbursement_rows").notNull().default("[]"),
+
+  managementFeePercent: integer("management_fee_percent").notNull().default(10),
+  managementFeeBase: text("management_fee_base").notNull().default("total_income"),
+  footerNote: text("footer_note").notNull().default("We thank you for your custom!"),
+
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+});
+
+// rental row now also carries a tenantId so arrears can carry forward per tenant
 export const rentalRowSchema = z.object({
+  tenantId: z.number().nullable().default(null),
   rentalPeriod: z.string().default(""),
   flat: z.string().default(""),
   tenantName: z.string().default(""),
   balanceBf: z.number().default(0),
   rentDemanded: z.number().default(0),
   rentPaid: z.number().default(0),
-  // balanceCf is computed: balanceBf + rentDemanded - rentPaid
 });
 export type RentalRow = z.infer<typeof rentalRowSchema>;
 
@@ -61,23 +105,17 @@ export const disbursementRowSchema = z.object({
 export type DisbursementRow = z.infer<typeof disbursementRowSchema>;
 
 export const insertStatementSchema = createInsertSchema(statements).omit({
-  id: true,
-  createdAt: true,
-  updatedAt: true,
+  id: true, createdAt: true, updatedAt: true,
 });
-
 export type InsertStatement = z.infer<typeof insertStatementSchema>;
 export type Statement = typeof statements.$inferSelect;
 
-// Keep the template's users table so nothing else breaks
+// Keep template users table
 export const users = sqliteTable("users", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   username: text("username").notNull().unique(),
   password: text("password").notNull(),
 });
-export const insertUserSchema = createInsertSchema(users).pick({
-  username: true,
-  password: true,
-});
+export const insertUserSchema = createInsertSchema(users).pick({ username: true, password: true });
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect;

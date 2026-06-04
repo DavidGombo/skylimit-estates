@@ -70,6 +70,7 @@ export default function StatementPrint() {
           <div className="text-[13px] mb-5 leading-relaxed">
             <div><span className="font-semibold">Property Address:</span> {s.propertyAddress}</div>
             <div><span className="font-semibold">Statement to:</span> {s.statementTo}</div>
+            {s.statementToAddress && <div><span className="font-semibold">Address:</span> {s.statementToAddress}</div>}
             <div className="font-semibold">{s.deliveryMethod}</div>
           </div>
 
@@ -77,16 +78,16 @@ export default function StatementPrint() {
           <table className="w-full border-collapse text-[12px] mb-1">
             <thead>
               <tr>
-                <th colSpan={7} className="bg-neutral-200 border border-neutral-400 py-1 text-center font-bold text-[13px]">Rental Schedule</th>
+                <th colSpan={7} className="bg-neutral-200 border border-neutral-400 py-1 text-center font-bold text-[13px]">Rental Income</th>
               </tr>
               <tr className="font-bold text-center">
                 <th className="border border-neutral-400 py-1 px-1">Rental Period</th>
                 <th className="border border-neutral-400 py-1 px-1">Flat</th>
                 <th className="border border-neutral-400 py-1 px-1">Tenant Name</th>
-                <th className="border border-neutral-400 py-1 px-1">Balance B/F</th>
-                <th className="border border-neutral-400 py-1 px-1">Rent Demanded</th>
-                <th className="border border-neutral-400 py-1 px-1">Rent Paid</th>
-                <th className="border border-neutral-400 py-1 px-1">Balance C/F</th>
+                <th className="border border-neutral-400 py-1 px-1">Rent Due</th>
+                <th className="border border-neutral-400 py-1 px-1">Rent Received</th>
+                <th className="border border-neutral-400 py-1 px-1">Arrears B/F</th>
+                <th className="border border-neutral-400 py-1 px-1">Arrears C/F</th>
               </tr>
             </thead>
             <tbody>
@@ -95,9 +96,9 @@ export default function StatementPrint() {
                   <td className="border border-neutral-400 py-1 px-1">{r.rentalPeriod || "\u00A0"}</td>
                   <td className="border border-neutral-400 py-1 px-1">{r.flat || "\u00A0"}</td>
                   <td className="border border-neutral-400 py-1 px-1 text-left pl-2">{r.tenantName || "\u00A0"}</td>
-                  <td className="border border-neutral-400 py-1 px-1">{gbpOrDash(r.balanceBf)}</td>
                   <td className="border border-neutral-400 py-1 px-1">{gbp(r.rentDemanded)}</td>
                   <td className="border border-neutral-400 py-1 px-1">{gbp(r.rentPaid)}</td>
+                  <td className="border border-neutral-400 py-1 px-1">{gbpOrDash(r.balanceBf)}</td>
                   <td className="border border-neutral-400 py-1 px-1">{gbpOrDash(balanceCf(r))}</td>
                 </tr>
               ))}
