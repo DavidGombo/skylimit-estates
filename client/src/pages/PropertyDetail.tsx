@@ -89,6 +89,14 @@ export default function PropertyDetail() {
             </div>
           </div>
           <TenantTable propertyId={id!} tenants={tenants ?? []} />
+          <div className="mt-5 rounded-lg bg-secondary/60 border border-border p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <p className="text-xs text-muted-foreground">
+              Ready to produce a statement? Rent fills in automatically, and you can add <span className="font-medium text-foreground">invoices &amp; expenses</span> on the statement screen.
+            </p>
+            <Button data-testid="button-produce-inline" className="bg-primary text-primary-foreground shrink-0" onClick={() => navigate(`/new/${id}`)}>
+              <FileOutput className="h-4 w-4 mr-1.5" /> Produce Statement
+            </Button>
+          </div>
         </section>
 
         {/* Property details */}

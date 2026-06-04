@@ -267,13 +267,25 @@ export default function StatementEditor() {
 
         {/* Disbursements */}
         <section className={card}>
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-sm font-semibold text-foreground">Disbursements</h2>
+          <div className="flex items-center justify-between mb-1">
+            <h2 className="text-sm font-semibold text-foreground">Disbursements — Invoices &amp; Expenses</h2>
             <Button variant="outline" size="sm" data-testid="button-add-disb" onClick={() => setDisbRows(r => [...r, { ...emptyDisb }])}>
               <Plus className="h-3.5 w-3.5 mr-1" /> Add invoice / expense
             </Button>
           </div>
-          {disbRows.length === 0 && <p className="text-sm text-muted-foreground py-2">No disbursements. Click “Add invoice / expense” to add one.</p>}
+          <p className="text-xs text-muted-foreground mb-4">Add each supplier invoice or expense for this period (cleaning, utilities, council tax, repairs, etc.). The total is deducted from rent collected.</p>
+          {disbRows.length === 0 && (
+            <button
+              type="button"
+              data-testid="button-add-disb-empty"
+              onClick={() => setDisbRows(r => [...r, { ...emptyDisb }])}
+              className="w-full rounded-lg border-2 border-dashed border-border py-6 flex flex-col items-center gap-1.5 text-muted-foreground hover-elevate"
+            >
+              <Plus className="h-5 w-5" />
+              <span className="text-sm font-medium">Add an invoice or expense</span>
+              <span className="text-xs">Click here to record a supplier invoice for this statement</span>
+            </button>
+          )}
           {disbRows.length > 0 && (
             <div className="overflow-x-auto">
               <table className="w-full min-w-[820px] text-sm">
