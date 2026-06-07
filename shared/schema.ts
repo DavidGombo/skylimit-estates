@@ -34,23 +34,61 @@ export type InsertProperty = z.infer<typeof insertPropertySchema>;
 export type Property = typeof properties.$inferSelect;
 
 // ---------------------------------------------------------------------------
-// TENANTS — presaved per property (flat, name, monthly rent)
+// TENANTS — presaved per property; now a full tenant record
 // ---------------------------------------------------------------------------
 export const tenants = sqliteTable("tenants", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   propertyId: integer("property_id").notNull(),
   flat: text("flat").notNull().default(""),
   tenantName: text("tenant_name").notNull().default(""),
-  monthlyRent: integer("monthly_rent_pence").notNull().default(0), // stored in pence to avoid float drift
-  active: integer("active").notNull().default(1), // 1 active, 0 archived (tenant left)
+  monthlyRent: integer("monthly_rent_pence").notNull().default(0), // pence
+  active: integer("active").notNull().default(1), // 1 active, 0 archived
+
+  // Contact
+  email: text("email").notNull().default(""),
+  phone: text("phone").notNull().default(""),
+
+  // Tenancy details
+  tenancyStart: text("tenancy_start").notNull().default(""), // YYYY-MM-DD
+  tenancyEnd: text("tenancy_end").notNull().default(""),
+  depositAmount: integer("deposit_amount_pence").notNull().default(0), // pence
+  depositScheme: text("deposit_scheme").notNull().default(""), // DPS / MyDeposits / TDS
+  idReference: text("id_reference").notNull().default(""), // passport/right-to-rent ref
+  notes: text("notes").notNull().default(""),
+
   createdAt: text("created_at").notNull(),
 });
 
 export const insertTenantSchema = createInsertSchema(tenants).omit({
   id: true, createdAt: true,
 });
+
 export type InsertTenant = z.infer<typeof insertTenantSchema>;
 export type Tenant = typeof tenants.$inferSelect;
+
+// ---------------------------------------------------------------------------
+// DOCUMENTS — uploaded files (tenancy agreements now; certs reuse in Phase 2)
+// Stored as base64 in SQLite so they survive redeploys via the data.db snapshot.
+// ---------------------------------------------------------------------------
+export const documents = sqliteTable("documents", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  propertyId: integer("property_id").notNull(),
+  tenantId: integer("tenant_id"), // optional link to a tenant
+  category: text("category").notNull().default("agreement"), // agreement | other
+  title: text("title").notNull().default(""),
+  fileName: text("file_name").notNull().default(""),
+  mimeType: text("mime_type").notNull().default("application/pdf"),
+  fileData: text("file_data").notNull().default(""), // base64
+  fileSize: integer("file_size").notNull().default(0),
+  aiSummary: text("ai_summary").notNull().default(""), // AI-extracted summary of the document
+  createdAt: text("created_at").notNull(),
+});
+
+export const insertDocumentSchema = createInsertSchema(documents).omit({
+  id: true, createdAt: true,
+});
+export type InsertDocument = z.infer<typeof insertDocumentSchema>;
+export type Document = typeof documents.$inferSelect;
 
 // ---------------------------------------------------------------------------
 // STATEMENTS — a produced statement, snapshotting all values

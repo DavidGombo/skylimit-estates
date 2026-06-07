@@ -1,7 +1,8 @@
-import { users, statements, properties, tenants } from '@shared/schema';
+import { users, statements, properties, tenants, documents } from '@shared/schema';
 import type {
   User, InsertUser, Statement, InsertStatement,
   Property, InsertProperty, Tenant, InsertTenant,
+  Document, InsertDocument,
 } from '@shared/schema';
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import Database from "better-sqlite3";
@@ -39,6 +40,27 @@ sqlite.exec(`
     tenant_name TEXT NOT NULL DEFAULT '',
     monthly_rent_pence INTEGER NOT NULL DEFAULT 0,
     active INTEGER NOT NULL DEFAULT 1,
+    email TEXT NOT NULL DEFAULT '',
+    phone TEXT NOT NULL DEFAULT '',
+    tenancy_start TEXT NOT NULL DEFAULT '',
+    tenancy_end TEXT NOT NULL DEFAULT '',
+    deposit_amount_pence INTEGER NOT NULL DEFAULT 0,
+    deposit_scheme TEXT NOT NULL DEFAULT '',
+    id_reference TEXT NOT NULL DEFAULT '',
+    notes TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS documents (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    property_id INTEGER NOT NULL,
+    tenant_id INTEGER,
+    category TEXT NOT NULL DEFAULT 'agreement',
+    title TEXT NOT NULL DEFAULT '',
+    file_name TEXT NOT NULL DEFAULT '',
+    mime_type TEXT NOT NULL DEFAULT 'application/pdf',
+    file_data TEXT NOT NULL DEFAULT '',
+    file_size INTEGER NOT NULL DEFAULT 0,
+    ai_summary TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL
   );
   CREATE TABLE IF NOT EXISTS statements (
@@ -64,6 +86,26 @@ sqlite.exec(`
   );
 `);
 
+// Idempotent migrations: add new tenant columns if the live DB predates them.
+function ensureColumn(table: string, column: string, ddl: string) {
+  const cols = sqlite.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
+  if (!cols.some((c) => c.name === column)) {
+    sqlite.exec(`ALTER TABLE ${table} ADD COLUMN ${ddl}`);
+  }
+}
+for (const [col, ddl] of [
+  ["email", "email TEXT NOT NULL DEFAULT ''"],
+  ["phone", "phone TEXT NOT NULL DEFAULT ''"],
+  ["tenancy_start", "tenancy_start TEXT NOT NULL DEFAULT ''"],
+  ["tenancy_end", "tenancy_end TEXT NOT NULL DEFAULT ''"],
+  ["deposit_amount_pence", "deposit_amount_pence INTEGER NOT NULL DEFAULT 0"],
+  ["deposit_scheme", "deposit_scheme TEXT NOT NULL DEFAULT ''"],
+  ["id_reference", "id_reference TEXT NOT NULL DEFAULT ''"],
+  ["notes", "notes TEXT NOT NULL DEFAULT ''"],
+] as const) {
+  ensureColumn("tenants", col, ddl);
+}
+
 export interface IStorage {
   getUser(id: number): Promise<User | undefined>;
   getUserByUsername(username: string): Promise<User | undefined>;
@@ -86,6 +128,12 @@ export interface IStorage {
   createStatement(data: InsertStatement): Promise<Statement>;
   updateStatement(id: number, data: InsertStatement): Promise<Statement | undefined>;
   deleteStatement(id: number): Promise<boolean>;
+
+  listDocuments(propertyId: number): Promise<Document[]>;
+  getDocument(id: number): Promise<Document | undefined>;
+  createDocument(data: InsertDocument): Promise<Document>;
+  updateDocument(id: number, data: Partial<InsertDocument>): Promise<Document | undefined>;
+  deleteDocument(id: number): Promise<boolean>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -106,6 +154,7 @@ export class DatabaseStorage implements IStorage {
   }
   async deleteProperty(id: number) {
     db.delete(tenants).where(eq(tenants.propertyId, id)).run();
+    db.delete(documents).where(eq(documents.propertyId, id)).run();
     const res = db.delete(properties).where(eq(properties.id, id)).run();
     return res.changes > 0;
   }
@@ -142,6 +191,23 @@ export class DatabaseStorage implements IStorage {
   }
   async deleteStatement(id: number) {
     const res = db.delete(statements).where(eq(statements.id, id)).run();
+    return res.changes > 0;
+  }
+
+  // ---- Documents ----
+  async listDocuments(propertyId: number) {
+    return db.select().from(documents).where(eq(documents.propertyId, propertyId)).orderBy(desc(documents.id)).all();
+  }
+  async getDocument(id: number) { return db.select().from(documents).where(eq(documents.id, id)).get(); }
+  async createDocument(data: InsertDocument) {
+    const now = new Date().toISOString();
+    return db.insert(documents).values({ ...data, createdAt: now }).returning().get();
+  }
+  async updateDocument(id: number, data: Partial<InsertDocument>) {
+    return db.update(documents).set(data).where(eq(documents.id, id)).returning().get();
+  }
+  async deleteDocument(id: number) {
+    const res = db.delete(documents).where(eq(documents.id, id)).run();
     return res.changes > 0;
   }
 }

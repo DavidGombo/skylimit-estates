@@ -16,6 +16,7 @@ declare module "http" {
 
 app.use(
   express.json({
+    limit: "12mb",
     verify: (req, _res, buf) => {
       req.rawBody = buf;
     },
@@ -51,7 +52,8 @@ app.use((req, res, next) => {
     if (path.startsWith("/api")) {
       let logLine = `${req.method} ${path} ${res.statusCode} in ${duration}ms`;
       if (capturedJsonResponse) {
-        logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;
+        const s = JSON.stringify(capturedJsonResponse);
+        logLine += ` :: ${s.length > 300 ? s.slice(0, 300) + "…" : s}`;
       }
 
       log(logLine);

@@ -31,6 +31,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     if (!ACCESS_KEY) return next();
     if (req.path === "/auth/check") return next();
     if (req.headers["x-access-key"] === ACCESS_KEY) return next();
+    // Allow file downloads/views via query key (browser can't set headers on direct nav)
+    if (/^\/documents\/\d+\/file$/.test(req.path) && req.query.key === ACCESS_KEY) return next();
     return res.status(401).json({ message: "Unauthorized" });
   });
 
@@ -70,7 +72,11 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     res.status(201).json(await storage.createTenant(parsed.data));
   });
   app.put("/api/tenants/:id", async (req, res) => {
-    const allowed = (["flat", "tenantName", "monthlyRent", "active"] as const);
+    const allowed = ([
+      "flat", "tenantName", "monthlyRent", "active",
+      "email", "phone", "tenancyStart", "tenancyEnd",
+      "depositAmount", "depositScheme", "idReference", "notes",
+    ] as const);
     const patch: Record<string, unknown> = {};
     for (const k of allowed) if (k in req.body) patch[k] = req.body[k];
     const updated = await storage.updateTenant(Number(req.params.id), patch);
@@ -122,6 +128,51 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     });
 
     res.json({ property, rentalRows });
+  });
+
+  // ---------- Documents (per property; tenancy agreements & files) ----------
+  // List omits the heavy base64 file_data for speed.
+  app.get("/api/properties/:id/documents", async (req, res) => {
+    const docs = await storage.listDocuments(Number(req.params.id));
+    res.json(docs.map(({ fileData, ...rest }) => rest));
+  });
+  app.post("/api/properties/:id/documents", async (req, res) => {
+    const propertyId = Number(req.params.id);
+    const { tenantId, category, title, fileName, mimeType, fileData, fileSize } = req.body ?? {};
+    if (!fileData || typeof fileData !== "string") {
+      return res.status(400).json({ message: "Missing file data" });
+    }
+    // ~8MB base64 cap to keep the SQLite snapshot reasonable
+    if (fileData.length > 11_000_000) {
+      return res.status(413).json({ message: "File too large (max ~8MB)" });
+    }
+    const doc = await storage.createDocument({
+      propertyId,
+      tenantId: tenantId ?? null,
+      category: category || "agreement",
+      title: title || fileName || "Document",
+      fileName: fileName || "document.pdf",
+      mimeType: mimeType || "application/pdf",
+      fileData,
+      fileSize: fileSize || 0,
+      aiSummary: "",
+    });
+    const { fileData: _omit, ...rest } = doc;
+    res.status(201).json(rest);
+  });
+  // Download / view raw file
+  app.get("/api/documents/:id/file", async (req, res) => {
+    const doc = await storage.getDocument(Number(req.params.id));
+    if (!doc) return res.status(404).json({ message: "Not found" });
+    const buf = Buffer.from(doc.fileData, "base64");
+    res.setHeader("Content-Type", doc.mimeType);
+    res.setHeader("Content-Disposition", `inline; filename="${doc.fileName.replace(/"/g, "")}"`);
+    res.send(buf);
+  });
+  app.delete("/api/documents/:id", async (req, res) => {
+    const ok = await storage.deleteDocument(Number(req.params.id));
+    if (!ok) return res.status(404).json({ message: "Not found" });
+    res.status(204).end();
   });
 
   // ---------- Statements ----------
