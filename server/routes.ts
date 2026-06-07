@@ -6,6 +6,7 @@ import {
   insertStatementSchema, insertPropertySchema, insertTenantSchema,
 } from "@shared/schema";
 import type { RentalRow } from "@shared/schema";
+import { reviewCertificate } from "./aiCert";
 
 function parseRows(json: string): RentalRow[] {
   try { return JSON.parse(json) as RentalRow[]; } catch { return []; }
@@ -32,7 +33,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     if (req.path === "/auth/check") return next();
     if (req.headers["x-access-key"] === ACCESS_KEY) return next();
     // Allow file downloads/views via query key (browser can't set headers on direct nav)
-    if (/^\/documents\/\d+\/file$/.test(req.path) && req.query.key === ACCESS_KEY) return next();
+    if (/^\/(documents|certificates)\/\d+\/file$/.test(req.path) && req.query.key === ACCESS_KEY) return next();
     return res.status(401).json({ message: "Unauthorized" });
   });
 
@@ -173,6 +174,139 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     const ok = await storage.deleteDocument(Number(req.params.id));
     if (!ok) return res.status(404).json({ message: "Not found" });
     res.status(204).end();
+  });
+
+  // ---------- Certificates / Compliance ----------
+  // list (omit heavy file_data)
+  app.get("/api/properties/:id/certificates", async (req, res) => {
+    const certs = await storage.listCertificates(Number(req.params.id));
+    res.json(certs.map(({ fileData, ...rest }) => rest));
+  });
+  // all certs across properties (for dashboard) — omit file_data
+  app.get("/api/certificates", async (_req, res) => {
+    const certs = await storage.listAllCertificates();
+    res.json(certs.map(({ fileData, ...rest }) => rest));
+  });
+  // Due/overdue certs within ?days=N (default 30) — for reminder digests
+  app.get("/api/compliance/due", async (req, res) => {
+    const days = Number(req.query.days) || 30;
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const props = await storage.listProperties();
+    const propName = new Map(props.map((p) => [p.id, p.propertyAddress]));
+    const certs = await storage.listAllCertificates();
+    const items = certs
+      .map((c) => {
+        if (!c.expiryDate) return null;
+        const d = new Date(c.expiryDate + "T00:00:00");
+        if (isNaN(d.getTime())) return null;
+        const daysLeft = Math.round((d.getTime() - today.getTime()) / 86400000);
+        if (daysLeft > days) return null;
+        return {
+          id: c.id, propertyId: c.propertyId, property: propName.get(c.propertyId) || "Property",
+          certType: c.certType, title: c.title, expiryDate: c.expiryDate, daysLeft,
+          status: daysLeft < 0 ? "overdue" : "expiring",
+        };
+      })
+      .filter(Boolean)
+      .sort((a: any, b: any) => a.daysLeft - b.daysLeft);
+    res.json({ count: items.length, days, items });
+  });
+  app.post("/api/properties/:id/certificates", async (req, res) => {
+    const propertyId = Number(req.params.id);
+    const b = req.body ?? {};
+    if (b.fileData && typeof b.fileData === "string" && b.fileData.length > 11_000_000) {
+      return res.status(413).json({ message: "File too large (max ~8MB)" });
+    }
+    const cert = await storage.createCertificate({
+      propertyId,
+      certType: b.certType || "gas_safety",
+      title: b.title || "",
+      provider: b.provider || "",
+      issueDate: b.issueDate || "",
+      expiryDate: b.expiryDate || "",
+      reference: b.reference || "",
+      fileName: b.fileName || "",
+      mimeType: b.mimeType || "",
+      fileData: b.fileData || "",
+      fileSize: b.fileSize || 0,
+      aiStatus: "", aiOutcome: "", aiSummary: "", aiRecommendations: "[]", aiExtractedExpiry: "",
+      notes: b.notes || "",
+    });
+    const { fileData, ...rest } = cert;
+    res.status(201).json(rest);
+  });
+  app.put("/api/certificates/:id", async (req, res) => {
+    const allowed = ([
+      "certType", "title", "provider", "issueDate", "expiryDate", "reference", "notes",
+      "fileName", "mimeType", "fileData", "fileSize",
+    ] as const);
+    const patch: Record<string, unknown> = {};
+    for (const k of allowed) if (k in req.body) patch[k] = req.body[k];
+    const updated = await storage.updateCertificate(Number(req.params.id), patch);
+    if (!updated) return res.status(404).json({ message: "Certificate not found" });
+    const { fileData, ...rest } = updated;
+    res.json(rest);
+  });
+  app.get("/api/certificates/:id/file", async (req, res) => {
+    const cert = await storage.getCertificate(Number(req.params.id));
+    if (!cert || !cert.fileData) return res.status(404).json({ message: "No file" });
+    res.setHeader("Content-Type", cert.mimeType || "application/octet-stream");
+    res.setHeader("Content-Disposition", `inline; filename="${(cert.fileName || "certificate").replace(/"/g, "")}"`);
+    res.send(Buffer.from(cert.fileData, "base64"));
+  });
+  app.delete("/api/certificates/:id", async (req, res) => {
+    const ok = await storage.deleteCertificate(Number(req.params.id));
+    if (!ok) return res.status(404).json({ message: "Certificate not found" });
+    res.status(204).end();
+  });
+
+  // AI review of an uploaded certificate
+  app.post("/api/certificates/:id/ai-review", async (req, res) => {
+    const id = Number(req.params.id);
+    const cert = await storage.getCertificate(id);
+    if (!cert) return res.status(404).json({ message: "Certificate not found" });
+    if (!cert.fileData) return res.status(400).json({ message: "Upload a file first so the AI can read it." });
+
+    await storage.updateCertificate(id, { aiStatus: "pending" });
+    try {
+      const buf = Buffer.from(cert.fileData, "base64");
+      const isPdf = (cert.mimeType || "").includes("pdf") || (cert.fileName || "").toLowerCase().endsWith(".pdf");
+      let review;
+      if (isPdf) {
+        const { PDFParse } = await import("pdf-parse");
+        const parser = new PDFParse({ data: buf });
+        const parsed = await parser.getText();
+        await parser.destroy().catch(() => {});
+        const text = ((parsed as any).text || "").trim();
+        if (!text) {
+          // scanned PDF with no text layer
+          review = { outcome: "unknown" as const, summary: "This PDF has no readable text (it may be a scan). Please enter the dates manually, or upload a clearer copy.", recommendations: [], extractedExpiry: "", extractedIssue: "", provider: "", reference: "" };
+        } else {
+          review = await reviewCertificate({ certType: cert.certType, pdfText: text });
+        }
+      } else {
+        review = await reviewCertificate({ certType: cert.certType, imageBase64: cert.fileData, imageMime: cert.mimeType });
+      }
+      const patch: Record<string, unknown> = {
+        aiStatus: "done",
+        aiOutcome: review.outcome,
+        aiSummary: review.summary,
+        aiRecommendations: JSON.stringify(review.recommendations),
+        aiExtractedExpiry: review.extractedExpiry || "",
+      };
+      // auto-fill blank fields from AI extraction (don't overwrite user entries)
+      if (!cert.expiryDate && review.extractedExpiry) patch.expiryDate = review.extractedExpiry;
+      if (!cert.issueDate && review.extractedIssue) patch.issueDate = review.extractedIssue;
+      if (!cert.provider && review.provider) patch.provider = review.provider;
+      if (!cert.reference && review.reference) patch.reference = review.reference;
+      const updated = await storage.updateCertificate(id, patch);
+      const { fileData, ...rest } = updated!;
+      res.json(rest);
+    } catch (err: any) {
+      console.error("AI review failed:", err?.message || err);
+      await storage.updateCertificate(id, { aiStatus: "error", aiSummary: "AI review could not be completed. " + (err?.message || "") });
+      res.status(500).json({ message: "AI review failed", detail: err?.message });
+    }
   });
 
   // ---------- Statements ----------

@@ -14,9 +14,10 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
-import { Plus, Trash2, Save, FileOutput, Users, FolderOpen } from "lucide-react";
+import { Plus, Trash2, Save, FileOutput, Users, FolderOpen, ShieldCheck } from "lucide-react";
 import { TenantCard } from "@/components/TenantCard";
 import { DocumentsSection } from "@/components/DocumentsSection";
+import { ComplianceSection } from "@/components/ComplianceSection";
 
 export default function PropertyDetail() {
   const [, params] = useRoute("/property/:id");
@@ -125,6 +126,16 @@ export default function PropertyDetail() {
           </div>
           <p className="text-xs text-muted-foreground mb-4">Store signed tenancy agreements and any property paperwork. Link a document to a specific tenant or keep it property-wide.</p>
           <DocumentsSection propertyId={id!} tenants={tenants ?? []} />
+        </section>
+
+        {/* Compliance */}
+        <section className={card}>
+          <div className="flex items-center gap-2 mb-1">
+            <ShieldCheck className="h-4 w-4 text-primary" />
+            <h2 className="text-sm font-semibold text-foreground">Compliance & safety certificates</h2>
+          </div>
+          <p className="text-xs text-muted-foreground mb-4">Track Gas Safety, EICR, EPC and other certificates with expiry dates. Attach the file and run the AI check for findings & recommendations.</p>
+          <ComplianceSection propertyId={id!} />
         </section>
 
         {/* Property details */}

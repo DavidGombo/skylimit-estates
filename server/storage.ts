@@ -1,8 +1,8 @@
-import { users, statements, properties, tenants, documents } from '@shared/schema';
+import { users, statements, properties, tenants, documents, certificates } from '@shared/schema';
 import type {
   User, InsertUser, Statement, InsertStatement,
   Property, InsertProperty, Tenant, InsertTenant,
-  Document, InsertDocument,
+  Document, InsertDocument, Certificate, InsertCertificate,
 } from '@shared/schema';
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import Database from "better-sqlite3";
@@ -62,6 +62,28 @@ sqlite.exec(`
     file_size INTEGER NOT NULL DEFAULT 0,
     ai_summary TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS certificates (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    property_id INTEGER NOT NULL,
+    cert_type TEXT NOT NULL DEFAULT 'gas_safety',
+    title TEXT NOT NULL DEFAULT '',
+    provider TEXT NOT NULL DEFAULT '',
+    issue_date TEXT NOT NULL DEFAULT '',
+    expiry_date TEXT NOT NULL DEFAULT '',
+    reference TEXT NOT NULL DEFAULT '',
+    file_name TEXT NOT NULL DEFAULT '',
+    mime_type TEXT NOT NULL DEFAULT '',
+    file_data TEXT NOT NULL DEFAULT '',
+    file_size INTEGER NOT NULL DEFAULT 0,
+    ai_status TEXT NOT NULL DEFAULT '',
+    ai_outcome TEXT NOT NULL DEFAULT '',
+    ai_summary TEXT NOT NULL DEFAULT '',
+    ai_recommendations TEXT NOT NULL DEFAULT '[]',
+    ai_extracted_expiry TEXT NOT NULL DEFAULT '',
+    notes TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
   );
   CREATE TABLE IF NOT EXISTS statements (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -134,6 +156,13 @@ export interface IStorage {
   createDocument(data: InsertDocument): Promise<Document>;
   updateDocument(id: number, data: Partial<InsertDocument>): Promise<Document | undefined>;
   deleteDocument(id: number): Promise<boolean>;
+
+  listCertificates(propertyId: number): Promise<Certificate[]>;
+  listAllCertificates(): Promise<Certificate[]>;
+  getCertificate(id: number): Promise<Certificate | undefined>;
+  createCertificate(data: InsertCertificate): Promise<Certificate>;
+  updateCertificate(id: number, data: Partial<InsertCertificate>): Promise<Certificate | undefined>;
+  deleteCertificate(id: number): Promise<boolean>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -155,6 +184,7 @@ export class DatabaseStorage implements IStorage {
   async deleteProperty(id: number) {
     db.delete(tenants).where(eq(tenants.propertyId, id)).run();
     db.delete(documents).where(eq(documents.propertyId, id)).run();
+    db.delete(certificates).where(eq(certificates.propertyId, id)).run();
     const res = db.delete(properties).where(eq(properties.id, id)).run();
     return res.changes > 0;
   }
@@ -208,6 +238,27 @@ export class DatabaseStorage implements IStorage {
   }
   async deleteDocument(id: number) {
     const res = db.delete(documents).where(eq(documents.id, id)).run();
+    return res.changes > 0;
+  }
+
+  // ---- Certificates ----
+  async listCertificates(propertyId: number) {
+    return db.select().from(certificates).where(eq(certificates.propertyId, propertyId)).orderBy(desc(certificates.id)).all();
+  }
+  async listAllCertificates() {
+    return db.select().from(certificates).orderBy(desc(certificates.id)).all();
+  }
+  async getCertificate(id: number) { return db.select().from(certificates).where(eq(certificates.id, id)).get(); }
+  async createCertificate(data: InsertCertificate) {
+    const now = new Date().toISOString();
+    return db.insert(certificates).values({ ...data, createdAt: now, updatedAt: now }).returning().get();
+  }
+  async updateCertificate(id: number, data: Partial<InsertCertificate>) {
+    const now = new Date().toISOString();
+    return db.update(certificates).set({ ...data, updatedAt: now }).where(eq(certificates.id, id)).returning().get();
+  }
+  async deleteCertificate(id: number) {
+    const res = db.delete(certificates).where(eq(certificates.id, id)).run();
     return res.changes > 0;
   }
 }

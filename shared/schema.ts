@@ -91,6 +91,68 @@ export type InsertDocument = z.infer<typeof insertDocumentSchema>;
 export type Document = typeof documents.$inferSelect;
 
 // ---------------------------------------------------------------------------
+// CERTIFICATES — compliance certs per property with expiry tracking + AI review
+// ---------------------------------------------------------------------------
+export const CERT_TYPES = [
+  "gas_safety",   // Gas Safety / CP12 (annual)
+  "eicr",         // Electrical Installation Condition Report (5 yrs)
+  "epc",          // Energy Performance Certificate (10 yrs)
+  "pat",          // Portable Appliance Testing
+  "fire_risk",    // Fire Risk Assessment
+  "legionella",   // Legionella risk assessment
+  "smoke_co",     // Smoke & CO alarm check
+  "insurance",    // Buildings/landlord insurance
+  "other",
+] as const;
+
+export const certificates = sqliteTable("certificates", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  propertyId: integer("property_id").notNull(),
+  certType: text("cert_type").notNull().default("gas_safety"),
+  title: text("title").notNull().default(""), // optional custom label (esp. for 'other')
+  provider: text("provider").notNull().default(""), // engineer/company who issued it
+  issueDate: text("issue_date").notNull().default(""), // YYYY-MM-DD
+  expiryDate: text("expiry_date").notNull().default(""), // YYYY-MM-DD
+  reference: text("reference").notNull().default(""), // cert/serial number
+
+  // Uploaded file (base64) — optional
+  fileName: text("file_name").notNull().default(""),
+  mimeType: text("mime_type").notNull().default(""),
+  fileData: text("file_data").notNull().default(""),
+  fileSize: integer("file_size").notNull().default(0),
+
+  // AI review output
+  aiStatus: text("ai_status").notNull().default(""), // "" | pending | done | error
+  aiOutcome: text("ai_outcome").notNull().default(""), // pass | advisory | fail | unknown
+  aiSummary: text("ai_summary").notNull().default(""),
+  aiRecommendations: text("ai_recommendations").notNull().default("[]"), // JSON array of strings
+  aiExtractedExpiry: text("ai_extracted_expiry").notNull().default(""), // expiry AI read from doc
+
+  notes: text("notes").notNull().default(""),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+});
+
+export const insertCertificateSchema = createInsertSchema(certificates).omit({
+  id: true, createdAt: true, updatedAt: true,
+});
+export type InsertCertificate = z.infer<typeof insertCertificateSchema>;
+export type Certificate = typeof certificates.$inferSelect;
+
+// Friendly labels + typical validity (months) for default expiry suggestions
+export const CERT_META: Record<string, { label: string; validityMonths: number | null }> = {
+  gas_safety: { label: "Gas Safety (CP12)", validityMonths: 12 },
+  eicr: { label: "EICR (Electrical)", validityMonths: 60 },
+  epc: { label: "EPC", validityMonths: 120 },
+  pat: { label: "PAT Testing", validityMonths: 12 },
+  fire_risk: { label: "Fire Risk Assessment", validityMonths: 12 },
+  legionella: { label: "Legionella Assessment", validityMonths: 24 },
+  smoke_co: { label: "Smoke & CO Alarms", validityMonths: 12 },
+  insurance: { label: "Landlord Insurance", validityMonths: 12 },
+  other: { label: "Other", validityMonths: null },
+};
+
+// ---------------------------------------------------------------------------
 // STATEMENTS — a produced statement, snapshotting all values
 // ---------------------------------------------------------------------------
 export const statements = sqliteTable("statements", {

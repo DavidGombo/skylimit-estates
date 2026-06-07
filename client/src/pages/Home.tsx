@@ -2,8 +2,9 @@ import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import type { Property, Statement, RentalRow, DisbursementRow } from "@shared/schema";
+import type { Property, Statement, RentalRow, DisbursementRow, Certificate } from "@shared/schema";
 import { computeTotals, gbp } from "@/lib/statement";
+import { ComplianceDashboard } from "@/components/ComplianceDashboard";
 import { AppHeader } from "@/components/AppHeader";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -115,6 +116,9 @@ export default function Home() {
       />
 
       <main className="mx-auto max-w-5xl px-6 py-8 space-y-10">
+        {/* Compliance dashboard */}
+        <ComplianceDashboard properties={properties ?? []} />
+
         {/* Properties */}
         <section>
           <div className="mb-4">
