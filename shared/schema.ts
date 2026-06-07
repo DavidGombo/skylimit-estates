@@ -1,12 +1,12 @@
-import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core";
+import { pgTable, text, integer, serial } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
 // ---------------------------------------------------------------------------
 // PROPERTIES — presaved property + landlord + issuer + fee settings
 // ---------------------------------------------------------------------------
-export const properties = sqliteTable("properties", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
+export const properties = pgTable("properties", {
+  id: serial("id").primaryKey(),
   propertyAddress: text("property_address").notNull(),
   statementTo: text("statement_to").notNull().default(""), // landlord / recipient
   statementToAddress: text("statement_to_address").notNull().default(""), // landlord address line
@@ -36,8 +36,8 @@ export type Property = typeof properties.$inferSelect;
 // ---------------------------------------------------------------------------
 // TENANTS — presaved per property; now a full tenant record
 // ---------------------------------------------------------------------------
-export const tenants = sqliteTable("tenants", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
+export const tenants = pgTable("tenants", {
+  id: serial("id").primaryKey(),
   propertyId: integer("property_id").notNull(),
   flat: text("flat").notNull().default(""),
   tenantName: text("tenant_name").notNull().default(""),
@@ -70,8 +70,8 @@ export type Tenant = typeof tenants.$inferSelect;
 // DOCUMENTS — uploaded files (tenancy agreements now; certs reuse in Phase 2)
 // Stored as base64 in SQLite so they survive redeploys via the data.db snapshot.
 // ---------------------------------------------------------------------------
-export const documents = sqliteTable("documents", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
+export const documents = pgTable("documents", {
+  id: serial("id").primaryKey(),
   propertyId: integer("property_id").notNull(),
   tenantId: integer("tenant_id"), // optional link to a tenant
   category: text("category").notNull().default("agreement"), // agreement | other
@@ -105,8 +105,8 @@ export const CERT_TYPES = [
   "other",
 ] as const;
 
-export const certificates = sqliteTable("certificates", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
+export const certificates = pgTable("certificates", {
+  id: serial("id").primaryKey(),
   propertyId: integer("property_id").notNull(),
   certType: text("cert_type").notNull().default("gas_safety"),
   title: text("title").notNull().default(""), // optional custom label (esp. for 'other')
@@ -148,8 +148,8 @@ export const MAINT_CATEGORIES = [
   "garden_exterior", "cleaning", "other",
 ] as const;
 
-export const maintenanceJobs = sqliteTable("maintenance_jobs", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
+export const maintenanceJobs = pgTable("maintenance_jobs", {
+  id: serial("id").primaryKey(),
   propertyId: integer("property_id").notNull(),
   tenantId: integer("tenant_id"), // optional: reported by / affecting tenant
   certificateId: integer("certificate_id"), // optional: created from a failed/advisory cert
@@ -206,8 +206,8 @@ export const CERT_META: Record<string, { label: string; validityMonths: number |
 // ---------------------------------------------------------------------------
 // STATEMENTS — a produced statement, snapshotting all values
 // ---------------------------------------------------------------------------
-export const statements = sqliteTable("statements", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
+export const statements = pgTable("statements", {
+  id: serial("id").primaryKey(),
   propertyId: integer("property_id"), // link back to property (nullable for legacy)
 
   // Snapshotted issuer + recipient (so edits to property don't rewrite history)
@@ -262,8 +262,8 @@ export type InsertStatement = z.infer<typeof insertStatementSchema>;
 export type Statement = typeof statements.$inferSelect;
 
 // Keep template users table
-export const users = sqliteTable("users", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
+export const users = pgTable("users", {
+  id: serial("id").primaryKey(),
   username: text("username").notNull().unique(),
   password: text("password").notNull(),
 });

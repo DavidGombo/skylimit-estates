@@ -15,14 +15,10 @@ const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
 
 export async function registerRoutes(httpServer: Server, app: Express): Promise<Server> {
   // ---------- Access gate ----------
-  // Require a shared access key on every /api request in production.
-  // Key resolves from ACCESS_KEY env var, else a compiled-in default so the
-  // gate is always on for the published site. In dev (NODE_ENV !== production)
-  // the gate is disabled for convenience.
-  const DEFAULT_ACCESS_KEY = "Skylimit2026!";
-  const ACCESS_KEY = process.env.NODE_ENV === "production"
-    ? (process.env.ACCESS_KEY || DEFAULT_ACCESS_KEY)
-    : undefined;
+  // Require a shared access key on every /api request when ACCESS_KEY is set.
+  // Set ACCESS_KEY as an environment variable in production (never hardcoded).
+  // When unset (local dev), the gate is disabled for convenience.
+  const ACCESS_KEY = process.env.ACCESS_KEY || undefined;
   app.get("/api/auth/check", (req, res) => {
     if (!ACCESS_KEY) return res.json({ ok: true, required: false });
     const ok = req.headers["x-access-key"] === ACCESS_KEY;

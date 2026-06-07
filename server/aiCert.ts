@@ -1,5 +1,22 @@
 import OpenAI from "openai";
 
+// Build an OpenAI client. In the Perplexity sandbox, HTTPS_PROXY points to the
+// agent proxy which injects the real Authorization header, so we route through
+// it and use a placeholder key. In production (Railway) there is no proxy and
+// OPENAI_API_KEY holds the real key.
+function makeClient(): OpenAI {
+  const proxy = process.env.HTTPS_PROXY || process.env.https_proxy;
+  if (proxy) {
+    // Lazy-require undici so production (no proxy) doesn't need it loaded.
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { ProxyAgent, fetch: undiciFetch } = require("undici");
+    const dispatcher = new ProxyAgent(proxy);
+    const proxyFetch = (url: any, init: any = {}) => undiciFetch(url, { ...init, dispatcher });
+    return new OpenAI({ apiKey: process.env.OPENAI_API_KEY || "proxy", fetch: proxyFetch as any });
+  }
+  return new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+}
+
 // Result shape returned to the client and stored on the certificate
 export interface CertReview {
   outcome: "pass" | "advisory" | "fail" | "unknown";
@@ -63,7 +80,7 @@ export async function reviewCertificate(opts: {
   imageMime?: string;
 }): Promise<CertReview> {
   const label = CERT_LABELS[opts.certType] || CERT_LABELS.other;
-  const client = new OpenAI();
+  const client = makeClient();
 
   let inputContent: any;
   if (opts.imageBase64) {
@@ -82,7 +99,7 @@ export async function reviewCertificate(opts: {
   }
 
   const response = await client.responses.create({
-    model: "gpt_5_1",
+    model: process.env.OPENAI_MODEL || "gpt-4o",
     instructions: SYSTEM,
     input: inputContent,
   });
@@ -116,7 +133,7 @@ Never advise unsafe DIY. Keep steps concrete and ordered.`;
 export async function troubleshootMaintenance(opts: {
   category: string; title: string; description: string;
 }): Promise<MaintReview> {
-  const client = new OpenAI();
+  const client = makeClient();
   const cat = MAINT_LABELS[opts.category] || "general";
   const prompt = `A ${cat} maintenance issue has been logged at a rental property.
 Title: ${opts.title || "(none)"}
@@ -137,7 +154,7 @@ Guidance:
 - Steps should be things the manager or tenant can safely check first (e.g. "Check the boiler pressure gauge reads 1-1.5 bar").`;
 
   const response = await client.responses.create({
-    model: "gpt_5_1",
+    model: process.env.OPENAI_MODEL || "gpt-4o",
     instructions: MAINT_SYSTEM,
     input: prompt,
   });

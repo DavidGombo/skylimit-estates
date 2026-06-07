@@ -5,151 +5,25 @@ import type {
   Document, InsertDocument, Certificate, InsertCertificate,
   MaintenanceJob, InsertMaintenanceJob,
 } from '@shared/schema';
-import { drizzle } from "drizzle-orm/better-sqlite3";
-import Database from "better-sqlite3";
-import { eq, desc, and } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/postgres-js";
+import postgres from "postgres";
+import { eq, desc } from "drizzle-orm";
 
-const sqlite = new Database("data.db");
-sqlite.pragma("journal_mode = WAL");
-export const db = drizzle(sqlite);
-
-sqlite.exec(`
-  CREATE TABLE IF NOT EXISTS users (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    username TEXT NOT NULL UNIQUE,
-    password TEXT NOT NULL
-  );
-  CREATE TABLE IF NOT EXISTS properties (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    property_address TEXT NOT NULL,
-    statement_to TEXT NOT NULL DEFAULT '',
-    statement_to_address TEXT NOT NULL DEFAULT '',
-    delivery_method TEXT NOT NULL DEFAULT 'By Email',
-    company_name TEXT NOT NULL DEFAULT 'Skylimit Estates Limited',
-    company_address TEXT NOT NULL DEFAULT '45 Stamford Hill, London N16 5SR',
-    company_email TEXT NOT NULL DEFAULT 'dg@skylimitestates.com',
-    management_fee_percent INTEGER NOT NULL DEFAULT 10,
-    management_fee_base TEXT NOT NULL DEFAULT 'total_income',
-    footer_note TEXT NOT NULL DEFAULT 'We thank you for your custom!',
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
-  );
-  CREATE TABLE IF NOT EXISTS tenants (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    property_id INTEGER NOT NULL,
-    flat TEXT NOT NULL DEFAULT '',
-    tenant_name TEXT NOT NULL DEFAULT '',
-    monthly_rent_pence INTEGER NOT NULL DEFAULT 0,
-    active INTEGER NOT NULL DEFAULT 1,
-    email TEXT NOT NULL DEFAULT '',
-    phone TEXT NOT NULL DEFAULT '',
-    tenancy_start TEXT NOT NULL DEFAULT '',
-    tenancy_end TEXT NOT NULL DEFAULT '',
-    deposit_amount_pence INTEGER NOT NULL DEFAULT 0,
-    deposit_scheme TEXT NOT NULL DEFAULT '',
-    id_reference TEXT NOT NULL DEFAULT '',
-    notes TEXT NOT NULL DEFAULT '',
-    created_at TEXT NOT NULL
-  );
-  CREATE TABLE IF NOT EXISTS documents (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    property_id INTEGER NOT NULL,
-    tenant_id INTEGER,
-    category TEXT NOT NULL DEFAULT 'agreement',
-    title TEXT NOT NULL DEFAULT '',
-    file_name TEXT NOT NULL DEFAULT '',
-    mime_type TEXT NOT NULL DEFAULT 'application/pdf',
-    file_data TEXT NOT NULL DEFAULT '',
-    file_size INTEGER NOT NULL DEFAULT 0,
-    ai_summary TEXT NOT NULL DEFAULT '',
-    created_at TEXT NOT NULL
-  );
-  CREATE TABLE IF NOT EXISTS certificates (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    property_id INTEGER NOT NULL,
-    cert_type TEXT NOT NULL DEFAULT 'gas_safety',
-    title TEXT NOT NULL DEFAULT '',
-    provider TEXT NOT NULL DEFAULT '',
-    issue_date TEXT NOT NULL DEFAULT '',
-    expiry_date TEXT NOT NULL DEFAULT '',
-    reference TEXT NOT NULL DEFAULT '',
-    file_name TEXT NOT NULL DEFAULT '',
-    mime_type TEXT NOT NULL DEFAULT '',
-    file_data TEXT NOT NULL DEFAULT '',
-    file_size INTEGER NOT NULL DEFAULT 0,
-    ai_status TEXT NOT NULL DEFAULT '',
-    ai_outcome TEXT NOT NULL DEFAULT '',
-    ai_summary TEXT NOT NULL DEFAULT '',
-    ai_recommendations TEXT NOT NULL DEFAULT '[]',
-    ai_extracted_expiry TEXT NOT NULL DEFAULT '',
-    notes TEXT NOT NULL DEFAULT '',
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
-  );
-  CREATE TABLE IF NOT EXISTS maintenance_jobs (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    property_id INTEGER NOT NULL,
-    tenant_id INTEGER,
-    certificate_id INTEGER,
-    category TEXT NOT NULL DEFAULT 'other',
-    title TEXT NOT NULL DEFAULT '',
-    description TEXT NOT NULL DEFAULT '',
-    priority TEXT NOT NULL DEFAULT 'medium',
-    status TEXT NOT NULL DEFAULT 'open',
-    reported_date TEXT NOT NULL DEFAULT '',
-    completed_date TEXT NOT NULL DEFAULT '',
-    contractor TEXT NOT NULL DEFAULT '',
-    cost_pence INTEGER NOT NULL DEFAULT 0,
-    ai_status TEXT NOT NULL DEFAULT '',
-    ai_diagnosis TEXT NOT NULL DEFAULT '',
-    ai_steps TEXT NOT NULL DEFAULT '[]',
-    ai_urgency TEXT NOT NULL DEFAULT '',
-    ai_advice TEXT NOT NULL DEFAULT '',
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
-  );
-  CREATE TABLE IF NOT EXISTS statements (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    property_id INTEGER,
-    company_name TEXT NOT NULL DEFAULT 'Skylimit Estates Limited',
-    company_address TEXT NOT NULL DEFAULT '45 Stamford Hill, London N16 5SR',
-    company_email TEXT NOT NULL DEFAULT 'dg@skylimitestates.com',
-    statement_date TEXT NOT NULL,
-    period_from TEXT NOT NULL,
-    period_to TEXT NOT NULL,
-    property_address TEXT NOT NULL,
-    statement_to TEXT NOT NULL,
-    statement_to_address TEXT NOT NULL DEFAULT '',
-    delivery_method TEXT NOT NULL DEFAULT 'By Email',
-    rental_rows TEXT NOT NULL DEFAULT '[]',
-    disbursement_rows TEXT NOT NULL DEFAULT '[]',
-    management_fee_percent INTEGER NOT NULL DEFAULT 10,
-    management_fee_base TEXT NOT NULL DEFAULT 'total_income',
-    footer_note TEXT NOT NULL DEFAULT 'We thank you for your custom!',
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
-  );
-`);
-
-// Idempotent migrations: add new tenant columns if the live DB predates them.
-function ensureColumn(table: string, column: string, ddl: string) {
-  const cols = sqlite.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
-  if (!cols.some((c) => c.name === column)) {
-    sqlite.exec(`ALTER TABLE ${table} ADD COLUMN ${ddl}`);
-  }
+const connectionString = process.env.DATABASE_URL;
+if (!connectionString) {
+  throw new Error("DATABASE_URL is not set. Provide the Postgres connection string.");
 }
-for (const [col, ddl] of [
-  ["email", "email TEXT NOT NULL DEFAULT ''"],
-  ["phone", "phone TEXT NOT NULL DEFAULT ''"],
-  ["tenancy_start", "tenancy_start TEXT NOT NULL DEFAULT ''"],
-  ["tenancy_end", "tenancy_end TEXT NOT NULL DEFAULT ''"],
-  ["deposit_amount_pence", "deposit_amount_pence INTEGER NOT NULL DEFAULT 0"],
-  ["deposit_scheme", "deposit_scheme TEXT NOT NULL DEFAULT ''"],
-  ["id_reference", "id_reference TEXT NOT NULL DEFAULT ''"],
-  ["notes", "notes TEXT NOT NULL DEFAULT ''"],
-] as const) {
-  ensureColumn("tenants", col, ddl);
-}
+
+// postgres-js client. SSL required for Supabase. Modest pool for a single service.
+const client = postgres(connectionString, {
+  ssl: "require",
+  max: Number(process.env.DB_POOL_MAX || 10),
+  idle_timeout: 20,
+  connect_timeout: 15,
+  prepare: false, // transaction pooler compatibility
+});
+
+export const db = drizzle(client);
 
 export interface IStorage {
   getUser(id: number): Promise<User | undefined>;
@@ -195,124 +69,79 @@ export interface IStorage {
   deleteMaintenance(id: number): Promise<boolean>;
 }
 
+const now = () => new Date().toISOString();
+const one = <T>(rows: T[]): T | undefined => rows[0];
+
 export class DatabaseStorage implements IStorage {
-  async getUser(id: number) { return db.select().from(users).where(eq(users.id, id)).get(); }
-  async getUserByUsername(username: string) { return db.select().from(users).where(eq(users.username, username)).get(); }
-  async createUser(insertUser: InsertUser) { return db.insert(users).values(insertUser).returning().get(); }
+  // ---- Users ----
+  async getUser(id: number) { return one(await db.select().from(users).where(eq(users.id, id))); }
+  async getUserByUsername(username: string) { return one(await db.select().from(users).where(eq(users.username, username))); }
+  async createUser(insertUser: InsertUser) { return one(await db.insert(users).values(insertUser).returning())!; }
 
   // ---- Properties ----
-  async listProperties() { return db.select().from(properties).orderBy(desc(properties.id)).all(); }
-  async getProperty(id: number) { return db.select().from(properties).where(eq(properties.id, id)).get(); }
+  async listProperties() { return db.select().from(properties).orderBy(desc(properties.id)); }
+  async getProperty(id: number) { return one(await db.select().from(properties).where(eq(properties.id, id))); }
   async createProperty(data: InsertProperty) {
-    const now = new Date().toISOString();
-    return db.insert(properties).values({ ...data, createdAt: now, updatedAt: now }).returning().get();
+    return one(await db.insert(properties).values({ ...data, createdAt: now(), updatedAt: now() }).returning())!;
   }
   async updateProperty(id: number, data: InsertProperty) {
-    const now = new Date().toISOString();
-    return db.update(properties).set({ ...data, updatedAt: now }).where(eq(properties.id, id)).returning().get();
+    return one(await db.update(properties).set({ ...data, updatedAt: now() }).where(eq(properties.id, id)).returning());
   }
   async deleteProperty(id: number) {
-    db.delete(tenants).where(eq(tenants.propertyId, id)).run();
-    db.delete(documents).where(eq(documents.propertyId, id)).run();
-    db.delete(certificates).where(eq(certificates.propertyId, id)).run();
-    db.delete(maintenanceJobs).where(eq(maintenanceJobs.propertyId, id)).run();
-    const res = db.delete(properties).where(eq(properties.id, id)).run();
-    return res.changes > 0;
+    await db.delete(tenants).where(eq(tenants.propertyId, id));
+    await db.delete(documents).where(eq(documents.propertyId, id));
+    await db.delete(certificates).where(eq(certificates.propertyId, id));
+    await db.delete(maintenanceJobs).where(eq(maintenanceJobs.propertyId, id));
+    const res = await db.delete(properties).where(eq(properties.id, id)).returning();
+    return res.length > 0;
   }
 
   // ---- Tenants ----
-  async listTenants(propertyId: number) {
-    return db.select().from(tenants).where(eq(tenants.propertyId, propertyId)).orderBy(tenants.id).all();
-  }
-  async createTenant(data: InsertTenant) {
-    const now = new Date().toISOString();
-    return db.insert(tenants).values({ ...data, createdAt: now }).returning().get();
-  }
+  async listTenants(propertyId: number) { return db.select().from(tenants).where(eq(tenants.propertyId, propertyId)).orderBy(tenants.id); }
+  async createTenant(data: InsertTenant) { return one(await db.insert(tenants).values({ ...data, createdAt: now() }).returning())!; }
   async updateTenant(id: number, data: Partial<InsertTenant>) {
-    return db.update(tenants).set(data).where(eq(tenants.id, id)).returning().get();
+    return one(await db.update(tenants).set(data).where(eq(tenants.id, id)).returning());
   }
-  async deleteTenant(id: number) {
-    const res = db.delete(tenants).where(eq(tenants.id, id)).run();
-    return res.changes > 0;
-  }
+  async deleteTenant(id: number) { return (await db.delete(tenants).where(eq(tenants.id, id)).returning()).length > 0; }
 
   // ---- Statements ----
-  async listStatements() { return db.select().from(statements).orderBy(desc(statements.id)).all(); }
-  async listStatementsByProperty(propertyId: number) {
-    return db.select().from(statements).where(eq(statements.propertyId, propertyId)).orderBy(desc(statements.id)).all();
-  }
-  async getStatement(id: number) { return db.select().from(statements).where(eq(statements.id, id)).get(); }
-  async createStatement(data: InsertStatement) {
-    const now = new Date().toISOString();
-    return db.insert(statements).values({ ...data, createdAt: now, updatedAt: now }).returning().get();
-  }
+  async listStatements() { return db.select().from(statements).orderBy(desc(statements.id)); }
+  async listStatementsByProperty(propertyId: number) { return db.select().from(statements).where(eq(statements.propertyId, propertyId)).orderBy(desc(statements.id)); }
+  async getStatement(id: number) { return one(await db.select().from(statements).where(eq(statements.id, id))); }
+  async createStatement(data: InsertStatement) { return one(await db.insert(statements).values({ ...data, createdAt: now(), updatedAt: now() }).returning())!; }
   async updateStatement(id: number, data: InsertStatement) {
-    const now = new Date().toISOString();
-    return db.update(statements).set({ ...data, updatedAt: now }).where(eq(statements.id, id)).returning().get();
+    return one(await db.update(statements).set({ ...data, updatedAt: now() }).where(eq(statements.id, id)).returning());
   }
-  async deleteStatement(id: number) {
-    const res = db.delete(statements).where(eq(statements.id, id)).run();
-    return res.changes > 0;
-  }
+  async deleteStatement(id: number) { return (await db.delete(statements).where(eq(statements.id, id)).returning()).length > 0; }
 
   // ---- Documents ----
-  async listDocuments(propertyId: number) {
-    return db.select().from(documents).where(eq(documents.propertyId, propertyId)).orderBy(desc(documents.id)).all();
-  }
-  async getDocument(id: number) { return db.select().from(documents).where(eq(documents.id, id)).get(); }
-  async createDocument(data: InsertDocument) {
-    const now = new Date().toISOString();
-    return db.insert(documents).values({ ...data, createdAt: now }).returning().get();
-  }
+  async listDocuments(propertyId: number) { return db.select().from(documents).where(eq(documents.propertyId, propertyId)).orderBy(desc(documents.id)); }
+  async getDocument(id: number) { return one(await db.select().from(documents).where(eq(documents.id, id))); }
+  async createDocument(data: InsertDocument) { return one(await db.insert(documents).values({ ...data, createdAt: now() }).returning())!; }
   async updateDocument(id: number, data: Partial<InsertDocument>) {
-    return db.update(documents).set(data).where(eq(documents.id, id)).returning().get();
+    return one(await db.update(documents).set(data).where(eq(documents.id, id)).returning());
   }
-  async deleteDocument(id: number) {
-    const res = db.delete(documents).where(eq(documents.id, id)).run();
-    return res.changes > 0;
-  }
+  async deleteDocument(id: number) { return (await db.delete(documents).where(eq(documents.id, id)).returning()).length > 0; }
 
   // ---- Certificates ----
-  async listCertificates(propertyId: number) {
-    return db.select().from(certificates).where(eq(certificates.propertyId, propertyId)).orderBy(desc(certificates.id)).all();
-  }
-  async listAllCertificates() {
-    return db.select().from(certificates).orderBy(desc(certificates.id)).all();
-  }
-  async getCertificate(id: number) { return db.select().from(certificates).where(eq(certificates.id, id)).get(); }
-  async createCertificate(data: InsertCertificate) {
-    const now = new Date().toISOString();
-    return db.insert(certificates).values({ ...data, createdAt: now, updatedAt: now }).returning().get();
-  }
+  async listCertificates(propertyId: number) { return db.select().from(certificates).where(eq(certificates.propertyId, propertyId)).orderBy(desc(certificates.id)); }
+  async listAllCertificates() { return db.select().from(certificates).orderBy(desc(certificates.id)); }
+  async getCertificate(id: number) { return one(await db.select().from(certificates).where(eq(certificates.id, id))); }
+  async createCertificate(data: InsertCertificate) { return one(await db.insert(certificates).values({ ...data, createdAt: now(), updatedAt: now() }).returning())!; }
   async updateCertificate(id: number, data: Partial<InsertCertificate>) {
-    const now = new Date().toISOString();
-    return db.update(certificates).set({ ...data, updatedAt: now }).where(eq(certificates.id, id)).returning().get();
+    return one(await db.update(certificates).set({ ...data, updatedAt: now() }).where(eq(certificates.id, id)).returning());
   }
-  async deleteCertificate(id: number) {
-    const res = db.delete(certificates).where(eq(certificates.id, id)).run();
-    return res.changes > 0;
-  }
+  async deleteCertificate(id: number) { return (await db.delete(certificates).where(eq(certificates.id, id)).returning()).length > 0; }
 
   // ---- Maintenance ----
-  async listMaintenance(propertyId: number) {
-    return db.select().from(maintenanceJobs).where(eq(maintenanceJobs.propertyId, propertyId)).orderBy(desc(maintenanceJobs.id)).all();
-  }
-  async listAllMaintenance() {
-    return db.select().from(maintenanceJobs).orderBy(desc(maintenanceJobs.id)).all();
-  }
-  async getMaintenance(id: number) { return db.select().from(maintenanceJobs).where(eq(maintenanceJobs.id, id)).get(); }
-  async createMaintenance(data: InsertMaintenanceJob) {
-    const now = new Date().toISOString();
-    return db.insert(maintenanceJobs).values({ ...data, createdAt: now, updatedAt: now }).returning().get();
-  }
+  async listMaintenance(propertyId: number) { return db.select().from(maintenanceJobs).where(eq(maintenanceJobs.propertyId, propertyId)).orderBy(desc(maintenanceJobs.id)); }
+  async listAllMaintenance() { return db.select().from(maintenanceJobs).orderBy(desc(maintenanceJobs.id)); }
+  async getMaintenance(id: number) { return one(await db.select().from(maintenanceJobs).where(eq(maintenanceJobs.id, id))); }
+  async createMaintenance(data: InsertMaintenanceJob) { return one(await db.insert(maintenanceJobs).values({ ...data, createdAt: now(), updatedAt: now() }).returning())!; }
   async updateMaintenance(id: number, data: Partial<InsertMaintenanceJob>) {
-    const now = new Date().toISOString();
-    return db.update(maintenanceJobs).set({ ...data, updatedAt: now }).where(eq(maintenanceJobs.id, id)).returning().get();
+    return one(await db.update(maintenanceJobs).set({ ...data, updatedAt: now() }).where(eq(maintenanceJobs.id, id)).returning());
   }
-  async deleteMaintenance(id: number) {
-    const res = db.delete(maintenanceJobs).where(eq(maintenanceJobs.id, id)).run();
-    return res.changes > 0;
-  }
+  async deleteMaintenance(id: number) { return (await db.delete(maintenanceJobs).where(eq(maintenanceJobs.id, id)).returning()).length > 0; }
 }
 
 export const storage = new DatabaseStorage();
