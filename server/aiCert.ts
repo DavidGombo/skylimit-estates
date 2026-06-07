@@ -7,12 +7,18 @@ import OpenAI from "openai";
 function makeClient(): OpenAI {
   const proxy = process.env.HTTPS_PROXY || process.env.https_proxy;
   if (proxy) {
-    // Lazy-require undici so production (no proxy) doesn't need it loaded.
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const { ProxyAgent, fetch: undiciFetch } = require("undici");
-    const dispatcher = new ProxyAgent(proxy);
-    const proxyFetch = (url: any, init: any = {}) => undiciFetch(url, { ...init, dispatcher });
-    return new OpenAI({ apiKey: process.env.OPENAI_API_KEY || "proxy", fetch: proxyFetch as any });
+    // Sandbox only: route through the agent proxy via undici if available.
+    // Wrapped in try/catch and an indirect require so production bundles
+    // (which have no proxy and may not include undici) never hard-fail.
+    try {
+      const req = eval("require") as NodeRequire;
+      const { ProxyAgent, fetch: undiciFetch } = req("undici");
+      const dispatcher = new ProxyAgent(proxy);
+      const proxyFetch = (url: any, init: any = {}) => undiciFetch(url, { ...init, dispatcher });
+      return new OpenAI({ apiKey: process.env.OPENAI_API_KEY || "proxy", fetch: proxyFetch as any });
+    } catch {
+      // fall through to the standard client
+    }
   }
   return new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 }
