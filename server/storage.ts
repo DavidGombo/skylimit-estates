@@ -1,8 +1,9 @@
-import { users, statements, properties, tenants, documents, certificates } from '@shared/schema';
+import { users, statements, properties, tenants, documents, certificates, maintenanceJobs } from '@shared/schema';
 import type {
   User, InsertUser, Statement, InsertStatement,
   Property, InsertProperty, Tenant, InsertTenant,
   Document, InsertDocument, Certificate, InsertCertificate,
+  MaintenanceJob, InsertMaintenanceJob,
 } from '@shared/schema';
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import Database from "better-sqlite3";
@@ -85,6 +86,28 @@ sqlite.exec(`
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
   );
+  CREATE TABLE IF NOT EXISTS maintenance_jobs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    property_id INTEGER NOT NULL,
+    tenant_id INTEGER,
+    certificate_id INTEGER,
+    category TEXT NOT NULL DEFAULT 'other',
+    title TEXT NOT NULL DEFAULT '',
+    description TEXT NOT NULL DEFAULT '',
+    priority TEXT NOT NULL DEFAULT 'medium',
+    status TEXT NOT NULL DEFAULT 'open',
+    reported_date TEXT NOT NULL DEFAULT '',
+    completed_date TEXT NOT NULL DEFAULT '',
+    contractor TEXT NOT NULL DEFAULT '',
+    cost_pence INTEGER NOT NULL DEFAULT 0,
+    ai_status TEXT NOT NULL DEFAULT '',
+    ai_diagnosis TEXT NOT NULL DEFAULT '',
+    ai_steps TEXT NOT NULL DEFAULT '[]',
+    ai_urgency TEXT NOT NULL DEFAULT '',
+    ai_advice TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
   CREATE TABLE IF NOT EXISTS statements (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     property_id INTEGER,
@@ -163,6 +186,13 @@ export interface IStorage {
   createCertificate(data: InsertCertificate): Promise<Certificate>;
   updateCertificate(id: number, data: Partial<InsertCertificate>): Promise<Certificate | undefined>;
   deleteCertificate(id: number): Promise<boolean>;
+
+  listMaintenance(propertyId: number): Promise<MaintenanceJob[]>;
+  listAllMaintenance(): Promise<MaintenanceJob[]>;
+  getMaintenance(id: number): Promise<MaintenanceJob | undefined>;
+  createMaintenance(data: InsertMaintenanceJob): Promise<MaintenanceJob>;
+  updateMaintenance(id: number, data: Partial<InsertMaintenanceJob>): Promise<MaintenanceJob | undefined>;
+  deleteMaintenance(id: number): Promise<boolean>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -185,6 +215,7 @@ export class DatabaseStorage implements IStorage {
     db.delete(tenants).where(eq(tenants.propertyId, id)).run();
     db.delete(documents).where(eq(documents.propertyId, id)).run();
     db.delete(certificates).where(eq(certificates.propertyId, id)).run();
+    db.delete(maintenanceJobs).where(eq(maintenanceJobs.propertyId, id)).run();
     const res = db.delete(properties).where(eq(properties.id, id)).run();
     return res.changes > 0;
   }
@@ -259,6 +290,27 @@ export class DatabaseStorage implements IStorage {
   }
   async deleteCertificate(id: number) {
     const res = db.delete(certificates).where(eq(certificates.id, id)).run();
+    return res.changes > 0;
+  }
+
+  // ---- Maintenance ----
+  async listMaintenance(propertyId: number) {
+    return db.select().from(maintenanceJobs).where(eq(maintenanceJobs.propertyId, propertyId)).orderBy(desc(maintenanceJobs.id)).all();
+  }
+  async listAllMaintenance() {
+    return db.select().from(maintenanceJobs).orderBy(desc(maintenanceJobs.id)).all();
+  }
+  async getMaintenance(id: number) { return db.select().from(maintenanceJobs).where(eq(maintenanceJobs.id, id)).get(); }
+  async createMaintenance(data: InsertMaintenanceJob) {
+    const now = new Date().toISOString();
+    return db.insert(maintenanceJobs).values({ ...data, createdAt: now, updatedAt: now }).returning().get();
+  }
+  async updateMaintenance(id: number, data: Partial<InsertMaintenanceJob>) {
+    const now = new Date().toISOString();
+    return db.update(maintenanceJobs).set({ ...data, updatedAt: now }).where(eq(maintenanceJobs.id, id)).returning().get();
+  }
+  async deleteMaintenance(id: number) {
+    const res = db.delete(maintenanceJobs).where(eq(maintenanceJobs.id, id)).run();
     return res.changes > 0;
   }
 }

@@ -139,6 +139,57 @@ export const insertCertificateSchema = createInsertSchema(certificates).omit({
 export type InsertCertificate = z.infer<typeof insertCertificateSchema>;
 export type Certificate = typeof certificates.$inferSelect;
 
+// ---------------------------------------------------------------------------
+// MAINTENANCE JOBS — log all maintenance with AI troubleshooting
+// ---------------------------------------------------------------------------
+export const MAINT_CATEGORIES = [
+  "plumbing", "electrical", "heating_gas", "appliance", "structural",
+  "damp_mould", "roofing", "pest", "locks_security", "decorating",
+  "garden_exterior", "cleaning", "other",
+] as const;
+
+export const maintenanceJobs = sqliteTable("maintenance_jobs", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  propertyId: integer("property_id").notNull(),
+  tenantId: integer("tenant_id"), // optional: reported by / affecting tenant
+  certificateId: integer("certificate_id"), // optional: created from a failed/advisory cert
+
+  category: text("category").notNull().default("other"),
+  title: text("title").notNull().default(""),
+  description: text("description").notNull().default(""),
+  priority: text("priority").notNull().default("medium"), // low | medium | high | urgent
+  status: text("status").notNull().default("open"), // open | in_progress | awaiting_parts | completed | cancelled
+
+  reportedDate: text("reported_date").notNull().default(""),
+  completedDate: text("completed_date").notNull().default(""),
+  contractor: text("contractor").notNull().default(""),
+  cost: integer("cost_pence").notNull().default(0), // pence
+
+  // AI troubleshooting output
+  aiStatus: text("ai_status").notNull().default(""), // "" | done | error
+  aiDiagnosis: text("ai_diagnosis").notNull().default(""),
+  aiSteps: text("ai_steps").notNull().default("[]"), // JSON array of step strings
+  aiUrgency: text("ai_urgency").notNull().default(""), // routine | soon | urgent | emergency
+  aiAdvice: text("ai_advice").notNull().default(""), // when to call a professional / safety note
+
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+});
+
+export const insertMaintenanceJobSchema = createInsertSchema(maintenanceJobs).omit({
+  id: true, createdAt: true, updatedAt: true,
+});
+export type InsertMaintenanceJob = z.infer<typeof insertMaintenanceJobSchema>;
+export type MaintenanceJob = typeof maintenanceJobs.$inferSelect;
+
+export const MAINT_CATEGORY_LABELS: Record<string, string> = {
+  plumbing: "Plumbing", electrical: "Electrical", heating_gas: "Heating & Gas",
+  appliance: "Appliance", structural: "Structural", damp_mould: "Damp & Mould",
+  roofing: "Roofing", pest: "Pest Control", locks_security: "Locks & Security",
+  decorating: "Decorating", garden_exterior: "Garden & Exterior", cleaning: "Cleaning",
+  other: "Other",
+};
+
 // Friendly labels + typical validity (months) for default expiry suggestions
 export const CERT_META: Record<string, { label: string; validityMonths: number | null }> = {
   gas_safety: { label: "Gas Safety (CP12)", validityMonths: 12 },

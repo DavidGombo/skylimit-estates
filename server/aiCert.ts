@@ -91,6 +91,81 @@ export async function reviewCertificate(opts: {
   return parseReview(text);
 }
 
+// ---------------------------------------------------------------------------
+// Maintenance troubleshooting
+// ---------------------------------------------------------------------------
+export interface MaintReview {
+  diagnosis: string;
+  steps: string[];
+  urgency: "routine" | "soon" | "urgent" | "emergency";
+  advice: string;
+}
+
+const MAINT_LABELS: Record<string, string> = {
+  plumbing: "plumbing", electrical: "electrical", heating_gas: "heating/gas",
+  appliance: "appliance", structural: "structural", damp_mould: "damp & mould",
+  roofing: "roofing", pest: "pest control", locks_security: "locks & security",
+  decorating: "decorating", garden_exterior: "garden & exterior", cleaning: "cleaning", other: "general",
+};
+
+const MAINT_SYSTEM = `You are a UK property maintenance assistant for a lettings / temporary-accommodation business.
+A property manager logs a maintenance issue and you provide practical, safe, step-by-step troubleshooting.
+You are pragmatic and safety-first. For gas, electrical, structural or anything dangerous, you tell them to stop and call a qualified professional (Gas Safe registered engineer for gas, qualified electrician for electrics).
+Never advise unsafe DIY. Keep steps concrete and ordered.`;
+
+export async function troubleshootMaintenance(opts: {
+  category: string; title: string; description: string;
+}): Promise<MaintReview> {
+  const client = new OpenAI();
+  const cat = MAINT_LABELS[opts.category] || "general";
+  const prompt = `A ${cat} maintenance issue has been logged at a rental property.
+Title: ${opts.title || "(none)"}
+Description: ${opts.description || "(none)"}
+
+Provide troubleshooting guidance. Return ONLY a JSON object with exactly these keys:
+{
+  "diagnosis": "1-2 sentences on the likely cause(s)",
+  "steps": ["ordered, concrete troubleshooting/triage step", "..."],
+  "urgency": "routine" | "soon" | "urgent" | "emergency",
+  "advice": "when to call a qualified professional, any safety warnings, and likely trade needed"
+}
+
+Guidance:
+- "urgency": "emergency" = immediate danger (gas smell, electrical burning, major leak/flood, no heating in freezing weather for vulnerable tenants); "urgent" = within 24-48h; "soon" = within a week; "routine" = can be scheduled.
+- For gas: always advise to turn off at the meter if a gas smell and call the National Gas Emergency line 0800 111 999 and a Gas Safe engineer; do not DIY.
+- For electrical hazards: advise isolating the circuit and calling a qualified electrician.
+- Steps should be things the manager or tenant can safely check first (e.g. "Check the boiler pressure gauge reads 1-1.5 bar").`;
+
+  const response = await client.responses.create({
+    model: "gpt_5_1",
+    instructions: MAINT_SYSTEM,
+    input: prompt,
+  });
+  const text = (response as any).output_text ?? "";
+  return parseMaint(text);
+}
+
+function parseMaint(raw: string): MaintReview {
+  const fallback: MaintReview = { diagnosis: "Could not generate guidance.", steps: [], urgency: "routine", advice: "" };
+  if (!raw) return fallback;
+  let s = raw.trim();
+  const fence = s.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (fence) s = fence[1].trim();
+  const a = s.indexOf("{"), b = s.lastIndexOf("}");
+  if (a >= 0 && b > a) s = s.slice(a, b + 1);
+  try {
+    const o = JSON.parse(s);
+    return {
+      diagnosis: typeof o.diagnosis === "string" ? o.diagnosis : "",
+      steps: Array.isArray(o.steps) ? o.steps.filter((x: unknown) => typeof x === "string") : [],
+      urgency: ["routine", "soon", "urgent", "emergency"].includes(o.urgency) ? o.urgency : "routine",
+      advice: typeof o.advice === "string" ? o.advice : "",
+    };
+  } catch {
+    return { ...fallback, diagnosis: raw.slice(0, 500) };
+  }
+}
+
 function parseReview(raw: string): CertReview {
   const fallback: CertReview = {
     outcome: "unknown", summary: "Could not interpret the document.",

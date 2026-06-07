@@ -18,6 +18,8 @@ import { Plus, Trash2, Save, FileOutput, Users, FolderOpen, ShieldCheck } from "
 import { TenantCard } from "@/components/TenantCard";
 import { DocumentsSection } from "@/components/DocumentsSection";
 import { ComplianceSection } from "@/components/ComplianceSection";
+import { MaintenanceSection } from "@/components/MaintenanceSection";
+import { Wrench } from "lucide-react";
 
 export default function PropertyDetail() {
   const [, params] = useRoute("/property/:id");
@@ -81,7 +83,7 @@ export default function PropertyDetail() {
       <AppHeader
         title={property.propertyAddress}
         subtitle={`To ${property.statementTo || "—"}`}
-        back={{ href: "/" }}
+        back={{ href: "/properties" }}
         right={
           <Button data-testid="button-produce" className="bg-accent text-accent-foreground hover:bg-accent/90 font-semibold" onClick={() => navigate(`/new/${id}`)}>
             <FileOutput className="h-4 w-4 mr-1.5" /> Produce Statement
@@ -136,6 +138,16 @@ export default function PropertyDetail() {
           </div>
           <p className="text-xs text-muted-foreground mb-4">Track Gas Safety, EICR, EPC and other certificates with expiry dates. Attach the file and run the AI check for findings & recommendations.</p>
           <ComplianceSection propertyId={id!} />
+        </section>
+
+        {/* Maintenance */}
+        <section className={card}>
+          <div className="flex items-center gap-2 mb-1">
+            <Wrench className="h-4 w-4 text-primary" />
+            <h2 className="text-sm font-semibold text-foreground">Maintenance</h2>
+          </div>
+          <p className="text-xs text-muted-foreground mb-4">Log repairs and issues by type. Run AI troubleshooting for a diagnosis and step-by-step guidance.</p>
+          <MaintenanceSection propertyId={id!} tenants={tenants ?? []} />
         </section>
 
         {/* Property details */}

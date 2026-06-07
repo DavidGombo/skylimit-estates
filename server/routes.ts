@@ -6,7 +6,7 @@ import {
   insertStatementSchema, insertPropertySchema, insertTenantSchema,
 } from "@shared/schema";
 import type { RentalRow } from "@shared/schema";
-import { reviewCertificate } from "./aiCert";
+import { reviewCertificate, troubleshootMaintenance } from "./aiCert";
 
 function parseRows(json: string): RentalRow[] {
   try { return JSON.parse(json) as RentalRow[]; } catch { return []; }
@@ -71,6 +71,16 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     const parsed = insertTenantSchema.safeParse(body);
     if (!parsed.success) return res.status(400).json({ message: "Invalid data", errors: parsed.error.flatten() });
     res.status(201).json(await storage.createTenant(parsed.data));
+  });
+  // All tenants across properties (for the Tenants hub)
+  app.get("/api/tenants", async (_req, res) => {
+    const props = await storage.listProperties();
+    const all: any[] = [];
+    for (const p of props) {
+      const ts = await storage.listTenants(p.id);
+      for (const t of ts) all.push({ ...t, propertyAddress: p.propertyAddress });
+    }
+    res.json(all);
   });
   app.put("/api/tenants/:id", async (req, res) => {
     const allowed = ([
@@ -307,6 +317,87 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       await storage.updateCertificate(id, { aiStatus: "error", aiSummary: "AI review could not be completed. " + (err?.message || "") });
       res.status(500).json({ message: "AI review failed", detail: err?.message });
     }
+  });
+
+  // ---------- Maintenance ----------
+  app.get("/api/properties/:id/maintenance", async (req, res) => {
+    res.json(await storage.listMaintenance(Number(req.params.id)));
+  });
+  app.get("/api/maintenance", async (_req, res) => res.json(await storage.listAllMaintenance()));
+  app.post("/api/properties/:id/maintenance", async (req, res) => {
+    const propertyId = Number(req.params.id);
+    const b = req.body ?? {};
+    const job = await storage.createMaintenance({
+      propertyId,
+      tenantId: b.tenantId ?? null,
+      certificateId: b.certificateId ?? null,
+      category: b.category || "other",
+      title: b.title || "",
+      description: b.description || "",
+      priority: b.priority || "medium",
+      status: b.status || "open",
+      reportedDate: b.reportedDate || new Date().toISOString().slice(0, 10),
+      completedDate: b.completedDate || "",
+      contractor: b.contractor || "",
+      cost: b.cost || 0,
+      aiStatus: "", aiDiagnosis: "", aiSteps: "[]", aiUrgency: "", aiAdvice: "",
+    });
+    res.status(201).json(job);
+  });
+  app.put("/api/maintenance/:id", async (req, res) => {
+    const allowed = ([
+      "category", "title", "description", "priority", "status",
+      "reportedDate", "completedDate", "contractor", "cost", "tenantId",
+    ] as const);
+    const patch: Record<string, unknown> = {};
+    for (const k of allowed) if (k in req.body) patch[k] = req.body[k];
+    const updated = await storage.updateMaintenance(Number(req.params.id), patch);
+    if (!updated) return res.status(404).json({ message: "Job not found" });
+    res.json(updated);
+  });
+  app.delete("/api/maintenance/:id", async (req, res) => {
+    const ok = await storage.deleteMaintenance(Number(req.params.id));
+    if (!ok) return res.status(404).json({ message: "Job not found" });
+    res.status(204).end();
+  });
+  // AI troubleshooting for a maintenance job
+  app.post("/api/maintenance/:id/ai-troubleshoot", async (req, res) => {
+    const id = Number(req.params.id);
+    const job = await storage.getMaintenance(id);
+    if (!job) return res.status(404).json({ message: "Job not found" });
+    try {
+      const r = await troubleshootMaintenance({ category: job.category, title: job.title, description: job.description });
+      const updated = await storage.updateMaintenance(id, {
+        aiStatus: "done", aiDiagnosis: r.diagnosis, aiSteps: JSON.stringify(r.steps),
+        aiUrgency: r.urgency, aiAdvice: r.advice,
+      });
+      res.json(updated);
+    } catch (err: any) {
+      console.error("AI troubleshoot failed:", err?.message || err);
+      await storage.updateMaintenance(id, { aiStatus: "error", aiDiagnosis: "AI troubleshooting could not be completed." });
+      res.status(500).json({ message: "AI troubleshoot failed", detail: err?.message });
+    }
+  });
+  // Create a maintenance job from a certificate (integration)
+  app.post("/api/certificates/:id/create-job", async (req, res) => {
+    const cert = await storage.getCertificate(Number(req.params.id));
+    if (!cert) return res.status(404).json({ message: "Certificate not found" });
+    const recs: string[] = (() => { try { return JSON.parse(cert.aiRecommendations || "[]"); } catch { return []; } })();
+    const certLabel = cert.title || cert.certType;
+    const job = await storage.createMaintenance({
+      propertyId: cert.propertyId,
+      tenantId: null,
+      certificateId: cert.id,
+      category: cert.certType === "gas_safety" ? "heating_gas" : cert.certType === "eicr" ? "electrical" : "other",
+      title: `Remedial work from ${certLabel} review`,
+      description: (cert.aiSummary ? cert.aiSummary + "\n\n" : "") + (recs.length ? "Recommendations:\n- " + recs.join("\n- ") : ""),
+      priority: cert.aiOutcome === "fail" ? "urgent" : "medium",
+      status: "open",
+      reportedDate: new Date().toISOString().slice(0, 10),
+      completedDate: "", contractor: "", cost: 0,
+      aiStatus: "", aiDiagnosis: "", aiSteps: "[]", aiUrgency: "", aiAdvice: "",
+    });
+    res.status(201).json(job);
   });
 
   // ---------- Statements ----------
