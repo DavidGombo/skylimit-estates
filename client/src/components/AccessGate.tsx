@@ -3,7 +3,8 @@ import { setAccessKey } from "@/lib/queryClient";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Building2, Lock } from "lucide-react";
+import { Lock } from "lucide-react";
+import { BrandMark } from "@/components/BrandLogo";
 
 const API_BASE = "__PORT_5000__".startsWith("__") ? "" : "__PORT_5000__";
 
@@ -51,11 +52,9 @@ export function AccessGate({ children }: { children: React.ReactNode }) {
       <div className="min-h-screen flex items-center justify-center bg-sidebar px-6">
         <form onSubmit={tryUnlock} className="w-full max-w-sm rounded-2xl bg-card border border-card-border p-8 shadow-lg">
           <div className="flex flex-col items-center text-center mb-6">
-            <div className="h-12 w-12 rounded-xl bg-primary/10 flex items-center justify-center mb-3">
-              <Building2 className="h-6 w-6 text-primary" />
-            </div>
-            <h1 className="text-lg font-bold text-foreground">Skylimit Estates</h1>
-            <p className="text-sm text-muted-foreground">Property Manager</p>
+            <BrandMark className="h-14 w-14 mb-3 text-primary" />
+            <h1 className="text-xl font-bold text-foreground tracking-[0.14em] uppercase">Skylimit</h1>
+            <p className="text-xs text-muted-foreground tracking-[0.3em] uppercase mt-0.5">Estates</p>
           </div>
           <div className="space-y-1.5">
             <Label className="text-xs font-medium text-muted-foreground flex items-center gap-1.5"><Lock className="h-3.5 w-3.5" /> Access password</Label>

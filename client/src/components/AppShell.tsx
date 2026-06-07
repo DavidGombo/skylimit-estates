@@ -3,6 +3,7 @@ import { Link, useLocation } from "wouter";
 import {
   LayoutDashboard, Building2, Users, ShieldCheck, Wrench, PoundSterling, Menu, X,
 } from "lucide-react";
+import { BrandMark } from "@/components/BrandLogo";
 
 const NAV = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard, match: (p: string) => p === "/" },
@@ -16,18 +17,10 @@ const NAV = [
 function Logo() {
   return (
     <div className="flex items-center gap-2.5">
-      <svg width="28" height="28" viewBox="0 0 32 32" fill="none" aria-label="Skylimit Estates" className="shrink-0">
-        <rect x="4" y="13" width="9" height="15" rx="1" className="fill-accent" />
-        <rect x="15" y="6" width="13" height="22" rx="1" className="fill-sidebar-foreground" opacity="0.92" />
-        <rect x="18" y="10" width="3" height="3" rx="0.5" className="fill-sidebar" />
-        <rect x="23" y="10" width="3" height="3" rx="0.5" className="fill-sidebar" />
-        <rect x="18" y="16" width="3" height="3" rx="0.5" className="fill-sidebar" />
-        <rect x="23" y="16" width="3" height="3" rx="0.5" className="fill-sidebar" />
-        <rect x="7" y="17" width="3" height="3" rx="0.5" className="fill-sidebar" />
-      </svg>
+      <BrandMark className="h-8 w-8 shrink-0 text-accent" />
       <div className="leading-tight">
-        <div className="font-bold text-sidebar-foreground text-sm">Skylimit Estates</div>
-        <div className="text-[10px] text-sidebar-foreground/60 tracking-wide uppercase">Property Manager</div>
+        <div className="font-bold text-sidebar-foreground text-[15px] tracking-[0.12em] uppercase">Skylimit</div>
+        <div className="text-[10px] text-sidebar-foreground/60 tracking-[0.28em] uppercase">Estates</div>
       </div>
     </div>
   );
