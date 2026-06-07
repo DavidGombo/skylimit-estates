@@ -54,8 +54,8 @@ export function AccessGate({ children }: { children: React.ReactNode }) {
             <div className="h-12 w-12 rounded-xl bg-primary/10 flex items-center justify-center mb-3">
               <Building2 className="h-6 w-6 text-primary" />
             </div>
-            <h1 className="text-lg font-bold text-foreground">Landlord Statements</h1>
-            <p className="text-sm text-muted-foreground">Skylimit Estates Limited</p>
+            <h1 className="text-lg font-bold text-foreground">Skylimit Estates</h1>
+            <p className="text-sm text-muted-foreground">Property Manager</p>
           </div>
           <div className="space-y-1.5">
             <Label className="text-xs font-medium text-muted-foreground flex items-center gap-1.5"><Lock className="h-3.5 w-3.5" /> Access password</Label>
