@@ -15,13 +15,13 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
-import { Plus, Trash2, Save, FileOutput, Users, FolderOpen, ShieldCheck, DoorOpen, Gauge } from "lucide-react";
+import { Plus, Trash2, Save, FileOutput, Users, FolderOpen, ShieldCheck, DoorOpen, Plug, ChevronRight } from "lucide-react";
+import { Link } from "wouter";
 import { TenantCard } from "@/components/TenantCard";
 import { DocumentsSection } from "@/components/DocumentsSection";
 import { ComplianceSection } from "@/components/ComplianceSection";
 import { MaintenanceSection } from "@/components/MaintenanceSection";
 import { RoomsSection } from "@/components/RoomsSection";
-import { UtilitiesSection } from "@/components/UtilitiesSection";
 import { FraActionsSection } from "@/components/FraActionsSection";
 import { Wrench } from "lucide-react";
 
@@ -165,15 +165,19 @@ export default function PropertyDetail() {
           </div>
         </section>
 
-        {/* Utilities & Council Tax */}
-        <section className={card}>
-          <div className="flex items-center gap-2 mb-1">
-            <Gauge className="h-4 w-4 text-primary" />
-            <h2 className="text-sm font-semibold text-foreground">Utilities & council tax</h2>
-          </div>
-          <p className="text-xs text-muted-foreground mb-4">Record council tax band, supplier accounts, who pays, and renewal dates.</p>
-          <UtilitiesSection propertyId={id!} rooms={roomList} isMultiRoom={isMultiRoom} />
-        </section>
+        {/* Utilities & Council Tax — managed centrally in the Utilities hub */}
+        <Link href="/utilities">
+          <button type="button" data-testid="link-utilities-hub" className="w-full text-left rounded-xl border border-card-border bg-card p-5 sm:p-6 hover-elevate flex items-center gap-3">
+            <div className="h-9 w-9 rounded bg-primary/10 flex items-center justify-center shrink-0">
+              <Plug className="h-4 w-4 text-primary" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <h2 className="text-sm font-semibold text-foreground">Utilities & council tax</h2>
+              <p className="text-xs text-muted-foreground mt-0.5">Council tax bands, supplier accounts and renewals are now managed centrally in the Utilities hub.</p>
+            </div>
+            <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" />
+          </button>
+        </Link>
 
         {/* Maintenance */}
         <section className={card}>

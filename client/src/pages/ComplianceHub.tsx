@@ -2,6 +2,7 @@ import { useQuery, useQueries } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import type { Certificate, Property, FraAction } from "@shared/schema";
 import { AppShell } from "@/components/AppShell";
+import { HubStat } from "@/components/HubStat";
 import { certLabel, statusOf, daysUntil, fmtDate, STATUS_STYLE, OUTCOME_STYLE, FRA_PRIORITY_STYLE } from "@/lib/compliance";
 import { ShieldCheck, ShieldAlert, ShieldX, ChevronRight, Flame } from "lucide-react";
 
@@ -13,12 +14,6 @@ export default function ComplianceHub() {
 
   let valid = 0, expiring = 0, overdue = 0;
   (certs ?? []).forEach((c) => { const s = statusOf(c); if (s === "valid") valid++; else if (s === "expiring") expiring++; else if (s === "overdue") overdue++; });
-
-  const cards = [
-    { label: "Valid", count: valid, icon: ShieldCheck, cls: "text-emerald-600 dark:text-emerald-400", bg: "bg-emerald-50 dark:bg-emerald-900/20" },
-    { label: "Expiring soon", count: expiring, icon: ShieldAlert, cls: "text-amber-600 dark:text-amber-400", bg: "bg-amber-50 dark:bg-amber-900/20" },
-    { label: "Overdue", count: overdue, icon: ShieldX, cls: "text-red-600 dark:text-red-400", bg: "bg-red-50 dark:bg-red-900/20" },
-  ];
 
   const sorted = [...(certs ?? [])].sort((a, b) => {
     const da = daysUntil(a.expiryDate) ?? 99999, db = daysUntil(b.expiryDate) ?? 99999;
@@ -40,15 +35,9 @@ export default function ComplianceHub() {
   return (
     <AppShell title="Compliance">
       <div className="grid grid-cols-3 gap-3 mb-6">
-        {cards.map((c) => (
-          <div key={c.label} className={`rounded-xl border border-card-border p-4 ${c.bg}`}>
-            <div className="flex items-center gap-2">
-              <c.icon className={`h-5 w-5 ${c.cls}`} />
-              <span className={`text-2xl font-bold tabular-nums ${c.cls}`}>{c.count}</span>
-            </div>
-            <p className="text-xs text-muted-foreground mt-1">{c.label}</p>
-          </div>
-        ))}
+        <HubStat label="Valid" count={valid} icon={ShieldCheck} tone="good" />
+        <HubStat label="Expiring soon" count={expiring} icon={ShieldAlert} tone={expiring ? "warn" : "neutral"} />
+        <HubStat label="Overdue" count={overdue} icon={ShieldX} tone={overdue ? "bad" : "neutral"} />
       </div>
 
       {openFra.length > 0 && (

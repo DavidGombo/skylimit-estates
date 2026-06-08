@@ -49,6 +49,7 @@ export interface IStorage {
   deleteRoom(id: number): Promise<boolean>;
 
   listUtilities(propertyId: number): Promise<Utility[]>;
+  listAllUtilities(): Promise<Utility[]>;
   createUtility(data: InsertUtility): Promise<Utility>;
   updateUtility(id: number, data: Partial<InsertUtility>): Promise<Utility | undefined>;
   deleteUtility(id: number): Promise<boolean>;
@@ -142,6 +143,7 @@ export class DatabaseStorage implements IStorage {
 
   // ---- Utilities ----
   async listUtilities(propertyId: number) { return db.select().from(utilities).where(eq(utilities.propertyId, propertyId)).orderBy(utilities.id); }
+  async listAllUtilities() { return db.select().from(utilities).orderBy(desc(utilities.id)); }
   async createUtility(data: InsertUtility) { return one(await db.insert(utilities).values({ ...data, createdAt: now(), updatedAt: now() }).returning())!; }
   async updateUtility(id: number, data: Partial<InsertUtility>) { return one(await db.update(utilities).set({ ...data, updatedAt: now() }).where(eq(utilities.id, id)).returning()); }
   async deleteUtility(id: number) { return (await db.delete(utilities).where(eq(utilities.id, id)).returning()).length > 0; }

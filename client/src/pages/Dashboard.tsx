@@ -1,11 +1,15 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueries } from "@tanstack/react-query";
 import { useLocation } from "wouter";
-import type { Property, Statement, Certificate, MaintenanceJob, RentalRow, DisbursementRow } from "@shared/schema";
+import type { Property, Statement, Certificate, MaintenanceJob, FraAction, Utility, RentalRow, DisbursementRow } from "@shared/schema";
 import { AppShell } from "@/components/AppShell";
-import { computeTotals, gbp, penceToPounds } from "@/lib/statement";
-import { statusOf, certLabel, daysUntil, fmtDate, STATUS_STYLE as CERT_STATUS } from "@/lib/compliance";
+import { HubStat } from "@/components/HubStat";
+import { computeTotals, gbp } from "@/lib/statement";
+import { statusOf, certLabel, daysUntil, STATUS_STYLE as CERT_STATUS, FRA_PRIORITY_STYLE } from "@/lib/compliance";
 import { STATUS_STYLE as JOB_STATUS, MAINT_CATEGORY_LABELS } from "@/lib/maintenance";
-import { Building2, Users, ShieldAlert, Wrench, PoundSterling, ChevronRight, ShieldCheck, ShieldX } from "lucide-react";
+import { UTILITY_LABELS } from "@shared/schema";
+import { Building2, ShieldAlert, Wrench, PoundSterling, ChevronRight, ShieldCheck, ShieldX, Plug, Flame } from "lucide-react";
+
+type UtilityRow = Utility & { propertyAddress: string; roomName: string };
 
 function parseRows<T>(j: string): T[] { try { return JSON.parse(j) as T[]; } catch { return []; } }
 
@@ -15,8 +19,27 @@ export default function Dashboard() {
   const { data: statements } = useQuery<Statement[]>({ queryKey: ["/api/statements"] });
   const { data: certs } = useQuery<Certificate[]>({ queryKey: ["/api/certificates"] });
   const { data: jobs } = useQuery<MaintenanceJob[]>({ queryKey: ["/api/maintenance"] });
+  const { data: utilities } = useQuery<UtilityRow[]>({ queryKey: ["/api/utilities"] });
 
   const propCount = properties?.length ?? 0;
+
+  // utilities renewals due within 30 days
+  const utilRenewals = (utilities ?? [])
+    .map((u) => ({ u, d: u.renewalDate ? daysUntil(u.renewalDate) : null }))
+    .filter((x) => x.d !== null && x.d <= 30)
+    .sort((a, b) => (a.d ?? 9999) - (b.d ?? 9999));
+
+  // open fire-safety (FRA) actions across all properties
+  const fraQueries = useQueries({
+    queries: (properties ?? []).map((p) => ({
+      queryKey: ["/api/properties", p.id, "fra-actions"] as const,
+      enabled: (properties?.length ?? 0) > 0,
+    })),
+  });
+  const openFra = fraQueries
+    .flatMap((q, i) => ((q.data as FraAction[] | undefined) ?? []).map((a) => ({ ...a, _prop: (properties ?? [])[i] })))
+    .filter((a) => a.status !== "done")
+    .sort((a, b) => (daysUntil(a.dueDate) ?? 99999) - (daysUntil(b.dueDate) ?? 99999));
 
   // compliance counts
   let valid = 0, expiring = 0, overdue = 0;
@@ -45,28 +68,15 @@ export default function Dashboard() {
 
   const propName = (id: number) => properties?.find((p) => p.id === id)?.propertyAddress || "Property";
 
-  const stats = [
-    { label: "Properties", value: propCount, icon: Building2, to: "/properties", cls: "text-primary" },
-    { label: "Compliance overdue", value: overdue, icon: ShieldX, to: "/compliance", cls: overdue ? "text-red-600 dark:text-red-400" : "text-muted-foreground" },
-    { label: "Expiring soon", value: expiring, icon: ShieldAlert, to: "/compliance", cls: expiring ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground" },
-    { label: "Open maintenance", value: openJobs.length, icon: Wrench, to: "/maintenance", cls: openJobs.length ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground" },
-  ];
-
   return (
     <AppShell title="Dashboard">
       {/* Stat cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
-        {stats.map((s) => (
-          <button key={s.label} onClick={() => navigate(s.to)} data-testid={`stat-${s.label.replace(/\s/g, "-").toLowerCase()}`}
-            className="rounded-xl border border-card-border bg-card p-4 text-left hover-elevate">
-            <div className="flex items-center justify-between">
-              <s.icon className={`h-5 w-5 ${s.cls}`} />
-              <ChevronRight className="h-4 w-4 text-muted-foreground" />
-            </div>
-            <p className={`text-2xl font-bold mt-2 tabular-nums ${s.cls}`}>{s.value}</p>
-            <p className="text-xs text-muted-foreground">{s.label}</p>
-          </button>
-        ))}
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 mb-6">
+        <HubStat label="Properties" count={propCount} icon={Building2} tone="neutral" onClick={() => navigate("/properties")} />
+        <HubStat label="Compliance overdue" count={overdue} icon={ShieldX} tone={overdue ? "bad" : "neutral"} onClick={() => navigate("/compliance")} />
+        <HubStat label="Expiring soon" count={expiring} icon={ShieldAlert} tone={expiring ? "warn" : "neutral"} onClick={() => navigate("/compliance")} />
+        <HubStat label="Open maintenance" count={openJobs.length} icon={Wrench} tone={openJobs.length ? "warn" : "neutral"} onClick={() => navigate("/maintenance")} />
+        <HubStat label="Renewals due ≤30d" count={utilRenewals.length} icon={Plug} tone={utilRenewals.length ? "warn" : "neutral"} onClick={() => navigate("/utilities")} />
       </div>
 
       <div className="grid lg:grid-cols-2 gap-6">
@@ -114,6 +124,64 @@ export default function Dashboard() {
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium text-foreground truncate">{j.title || MAINT_CATEGORY_LABELS[j.category]} — {propName(j.propertyId)}</p>
                       <p className="text-xs text-muted-foreground">{MAINT_CATEGORY_LABELS[j.category]} · {ss.label}</p>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </section>
+
+        {/* Fire-safety to-dos */}
+        <section className="rounded-xl border border-card-border bg-card p-5">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-sm font-semibold text-foreground flex items-center gap-2"><Flame className="h-4 w-4 text-primary" /> Fire-safety to-dos</h2>
+            <button className="text-xs text-primary font-medium" onClick={() => navigate("/compliance")} data-testid="link-all-fra">View all</button>
+          </div>
+          {openFra.length === 0 ? (
+            <p className="text-sm text-muted-foreground py-4 text-center">No open fire-safety actions. You're all caught up.</p>
+          ) : (
+            <div className="space-y-2">
+              {openFra.slice(0, 5).map((a) => {
+                const fp = FRA_PRIORITY_STYLE[a.priority] || FRA_PRIORITY_STYLE.medium;
+                const d = daysUntil(a.dueDate);
+                const isOverdue = d !== null && d < 0;
+                return (
+                  <button key={a.id} onClick={() => navigate(`/property/${a.propertyId}`)} className="w-full flex items-center gap-2.5 rounded-lg p-2 text-left hover-elevate" data-testid={`dash-fra-${a.id}`}>
+                    <Flame className="h-4 w-4 text-red-500 shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-foreground truncate">{a.action} — {a._prop?.propertyAddress || "Property"}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {fp.label}{d !== null && <span className={isOverdue ? "text-destructive font-medium" : ""}> · {isOverdue ? `${Math.abs(d)}d overdue` : `${d}d left`}</span>}
+                      </p>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </section>
+
+        {/* Utilities renewals due */}
+        <section className="rounded-xl border border-card-border bg-card p-5">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-sm font-semibold text-foreground flex items-center gap-2"><Plug className="h-4 w-4 text-primary" /> Utilities renewals due</h2>
+            <button className="text-xs text-primary font-medium" onClick={() => navigate("/utilities")} data-testid="link-all-utilities">View all</button>
+          </div>
+          {utilRenewals.length === 0 ? (
+            <p className="text-sm text-muted-foreground py-4 text-center">{(utilities?.length ?? 0) === 0 ? "No utilities recorded yet." : "No renewals due in the next 30 days."}</p>
+          ) : (
+            <div className="space-y-2">
+              {utilRenewals.slice(0, 5).map(({ u, d }) => {
+                const isOverdue = d !== null && d < 0;
+                return (
+                  <button key={u.id} onClick={() => navigate("/utilities")} className="w-full flex items-center gap-2.5 rounded-lg p-2 text-left hover-elevate" data-testid={`dash-util-${u.id}`}>
+                    <Plug className="h-4 w-4 text-muted-foreground shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-foreground truncate">{UTILITY_LABELS[u.utilityType] || u.utilityType} — {u.propertyAddress}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {u.provider || "Renewal"}{d !== null && <span className={isOverdue ? "text-destructive font-medium" : ""}> · {isOverdue ? `${Math.abs(d)}d overdue` : `${d}d left`}</span>}
+                      </p>
                     </div>
                   </button>
                 );

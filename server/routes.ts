@@ -113,6 +113,19 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   // ---------- Utilities & Council Tax ----------
+  // All utilities across properties (for the Utilities hub), with property address + room name
+  app.get("/api/utilities", async (_req, res) => {
+    const props = await storage.listProperties();
+    const propName = new Map(props.map((p) => [p.id, p.propertyAddress]));
+    const all = await storage.listAllUtilities();
+    const result: any[] = [];
+    for (const u of all) {
+      let roomName = "";
+      if (u.roomId) { const r = await storage.getRoom(u.roomId); roomName = r?.name || ""; }
+      result.push({ ...u, propertyAddress: propName.get(u.propertyId) || "Property", roomName });
+    }
+    res.json(result);
+  });
   app.get("/api/properties/:id/utilities", async (req, res) => {
     res.json(await storage.listUtilities(Number(req.params.id)));
   });

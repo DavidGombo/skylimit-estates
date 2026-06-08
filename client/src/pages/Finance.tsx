@@ -4,6 +4,7 @@ import { useLocation } from "wouter";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import type { Property, Statement, RentalRow, DisbursementRow } from "@shared/schema";
 import { AppShell } from "@/components/AppShell";
+import { HubStat } from "@/components/HubStat";
 import { computeTotals, gbp } from "@/lib/statement";
 import { Button } from "@/components/ui/button";
 import {
@@ -13,6 +14,7 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useToast } from "@/hooks/use-toast";
 import { FileText, FileOutput, Pencil, Printer, Trash2, PoundSterling, Building2 } from "lucide-react";
 
@@ -70,21 +72,9 @@ export default function Finance() {
 
       {/* Totals */}
       <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 mb-6">
-        <div className="rounded-xl border border-card-border bg-card p-4">
-          <PoundSterling className="h-5 w-5 text-primary" />
-          <p className="text-2xl font-bold text-primary mt-2 tabular-nums">{gbp(totalTransferable)}</p>
-          <p className="text-xs text-muted-foreground">Total transferable</p>
-        </div>
-        <div className="rounded-xl border border-card-border bg-card p-4">
-          <PoundSterling className="h-5 w-5 text-muted-foreground" />
-          <p className="text-2xl font-bold text-foreground mt-2 tabular-nums">{gbp(totalIncome)}</p>
-          <p className="text-xs text-muted-foreground">Total rent collected</p>
-        </div>
-        <div className="rounded-xl border border-card-border bg-card p-4">
-          <FileText className="h-5 w-5 text-muted-foreground" />
-          <p className="text-2xl font-bold text-foreground mt-2 tabular-nums">{statements?.length ?? 0}</p>
-          <p className="text-xs text-muted-foreground">Statements produced</p>
-        </div>
+        <HubStat label="Total transferable" count={gbp(totalTransferable)} icon={PoundSterling} tone="neutral" />
+        <HubStat label="Total rent collected" count={gbp(totalIncome)} icon={PoundSterling} tone="neutral" />
+        <HubStat label="Statements produced" count={statements?.length ?? 0} icon={FileText} tone="neutral" />
       </div>
 
       <p className="text-xs font-medium text-muted-foreground mb-2 uppercase tracking-wide">Statements</p>
@@ -114,9 +104,14 @@ export default function Finance() {
                 <Button variant="outline" size="sm" data-testid={`button-edit-${s.id}`} onClick={() => navigate(`/edit/${s.id}`)}><Pencil className="h-3.5 w-3.5 mr-1" /> Edit</Button>
                 <Button size="sm" className="bg-primary text-primary-foreground" data-testid={`button-print-${s.id}`} onClick={() => navigate(`/print/${s.id}`)}><Printer className="h-3.5 w-3.5 mr-1" /> PDF</Button>
                 <AlertDialog>
-                  <AlertDialogTrigger asChild>
-                    <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive" data-testid={`button-delete-${s.id}`}><Trash2 className="h-4 w-4" /></Button>
-                  </AlertDialogTrigger>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <AlertDialogTrigger asChild>
+                        <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive" data-testid={`button-delete-${s.id}`}><Trash2 className="h-4 w-4" /></Button>
+                      </AlertDialogTrigger>
+                    </TooltipTrigger>
+                    <TooltipContent>Delete statement</TooltipContent>
+                  </Tooltip>
                   <AlertDialogContent>
                     <AlertDialogHeader>
                       <AlertDialogTitle>Delete this statement?</AlertDialogTitle>

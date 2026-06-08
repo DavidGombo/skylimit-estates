@@ -12,6 +12,7 @@ import PropertyDetail from "@/pages/PropertyDetail";
 import TenantsHub from "@/pages/TenantsHub";
 import ComplianceHub from "@/pages/ComplianceHub";
 import MaintenanceHub from "@/pages/MaintenanceHub";
+import UtilitiesHub from "@/pages/UtilitiesHub";
 import Finance from "@/pages/Finance";
 import StatementEditor from "@/pages/StatementEditor";
 import StatementPrint from "@/pages/StatementPrint";
@@ -26,6 +27,7 @@ function AppRouter() {
       <Route path="/tenants" component={TenantsHub} />
       <Route path="/compliance" component={ComplianceHub} />
       <Route path="/maintenance" component={MaintenanceHub} />
+      <Route path="/utilities" component={UtilitiesHub} />
       <Route path="/finance" component={Finance} />
       <Route path="/new/:propertyId" component={StatementEditor} />
       <Route path="/edit/:id" component={StatementEditor} />
