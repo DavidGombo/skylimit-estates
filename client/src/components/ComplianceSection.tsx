@@ -1,9 +1,9 @@
 import { useRef, useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient, getAccessKey } from "@/lib/queryClient";
-import type { Certificate } from "@shared/schema";
+import type { Certificate, Room } from "@shared/schema";
 import {
-  CERT_META, certLabel, statusOf, STATUS_STYLE, OUTCOME_STYLE, fmtDate, daysUntil, addMonths,
+  CERT_META, certLabel, statusOf, STATUS_STYLE, OUTCOME_STYLE, fmtDate, daysUntil, addMonths, EPC_BAND_STYLE,
 } from "@/lib/compliance";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -26,8 +26,7 @@ function certFileUrl(id: number) {
   return `${API_BASE}/api/certificates/${id}/file${key ? `?key=${encodeURIComponent(key)}` : ""}`;
 }
 
-export function ComplianceSection({ propertyId }: { propertyId: number }) {
-  const { toast } = useToast();
+export function ComplianceSection({ propertyId, rooms = [], isMultiRoom = false }: { propertyId: number; rooms?: Room[]; isMultiRoom?: boolean }) {
   const [adding, setAdding] = useState(false);
 
   const { data: certs } = useQuery<Certificate[]>({ queryKey: ["/api/properties", propertyId, "certificates"] });
@@ -40,7 +39,7 @@ export function ComplianceSection({ propertyId }: { propertyId: number }) {
         </Button>
       </div>
 
-      {adding && <AddCertForm propertyId={propertyId} onDone={() => setAdding(false)} />}
+      {adding && <AddCertForm propertyId={propertyId} rooms={rooms} isMultiRoom={isMultiRoom} onDone={() => setAdding(false)} />}
 
       {(!certs || certs.length === 0) && !adding && (
         <button
@@ -56,19 +55,20 @@ export function ComplianceSection({ propertyId }: { propertyId: number }) {
       )}
 
       <div className="space-y-2.5 mt-1">
-        {certs?.map((c) => <CertCard key={c.id} propertyId={propertyId} cert={c} />)}
+        {certs?.map((c) => <CertCard key={c.id} propertyId={propertyId} cert={c} rooms={rooms} isMultiRoom={isMultiRoom} />)}
       </div>
     </div>
   );
 }
 
-function AddCertForm({ propertyId, onDone }: { propertyId: number; onDone: () => void }) {
+function AddCertForm({ propertyId, rooms, isMultiRoom, onDone }: { propertyId: number; rooms: Room[]; isMultiRoom: boolean; onDone: () => void }) {
   const { toast } = useToast();
   const fileRef = useRef<HTMLInputElement>(null);
   const [certType, setCertType] = useState("gas_safety");
   const [issueDate, setIssueDate] = useState("");
   const [expiryDate, setExpiryDate] = useState("");
   const [title, setTitle] = useState("");
+  const [roomId, setRoomId] = useState<number | null>(null);
   const [file, setFile] = useState<File | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -89,7 +89,7 @@ function AddCertForm({ propertyId, onDone }: { propertyId: number; onDone: () =>
         fileData = dataUrl.split(",")[1] ?? ""; fileName = file.name; mimeType = file.type || "application/pdf"; fileSize = file.size;
       }
       await apiRequest("POST", `/api/properties/${propertyId}/certificates`, {
-        certType, title: certType === "other" ? title : "", issueDate, expiryDate,
+        certType, title: certType === "other" ? title : "", issueDate, expiryDate, roomId,
         fileName, mimeType, fileData, fileSize,
       });
       queryClient.invalidateQueries({ queryKey: ["/api/properties", propertyId, "certificates"] });
@@ -119,6 +119,18 @@ function AddCertForm({ propertyId, onDone }: { propertyId: number; onDone: () =>
             <Input value={title} data-testid="input-cert-title" onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Asbestos survey" />
           </div>
         )}
+        {isMultiRoom && (
+          <div className="space-y-1.5">
+            <Label className={labelCls}>Room</Label>
+            <Select value={roomId == null ? "none" : String(roomId)} onValueChange={(v) => setRoomId(v === "none" ? null : Number(v))}>
+              <SelectTrigger data-testid="select-cert-room"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">Whole property</SelectItem>
+                {rooms.map((r) => <SelectItem key={r.id} value={String(r.id)}>{r.name || `Room ${r.id}`}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
         <div className="space-y-1.5">
           <Label className={labelCls}>Issue date</Label>
           <Input type="date" value={issueDate} data-testid="input-cert-issue" onChange={(e) => onIssue(e.target.value)} />
@@ -146,7 +158,7 @@ function AddCertForm({ propertyId, onDone }: { propertyId: number; onDone: () =>
   );
 }
 
-function CertCard({ propertyId, cert }: { propertyId: number; cert: Certificate }) {
+function CertCard({ propertyId, cert, rooms, isMultiRoom }: { propertyId: number; cert: Certificate; rooms: Room[]; isMultiRoom: boolean }) {
   const { toast } = useToast();
   const [open, setOpen] = useState(false);
   const status = statusOf(cert);
@@ -154,13 +166,20 @@ function CertCard({ propertyId, cert }: { propertyId: number; cert: Certificate 
   const d = daysUntil(cert.expiryDate);
   const recs: string[] = (() => { try { return JSON.parse(cert.aiRecommendations || "[]"); } catch { return []; } })();
   const hasFile = !!cert.fileName;
+  const roomName = cert.roomId != null ? (rooms.find((r) => r.id === cert.roomId)?.name || `Room ${cert.roomId}`) : null;
 
   const aiReview = useMutation({
-    mutationFn: () => apiRequest("POST", `/api/certificates/${cert.id}/ai-review`),
-    onSuccess: () => {
+    mutationFn: async () => (await apiRequest("POST", `/api/certificates/${cert.id}/ai-review`)).json() as Promise<Certificate & { fraCreated?: number }>,
+    onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: ["/api/properties", propertyId, "certificates"] });
       queryClient.invalidateQueries({ queryKey: ["/api/certificates"] });
-      toast({ title: "AI review complete" });
+      const fraCreated = result?.fraCreated ?? 0;
+      if (cert.certType === "fire_risk" && fraCreated > 0) {
+        queryClient.invalidateQueries({ queryKey: ["/api/properties", propertyId, "fra-actions"] });
+        toast({ title: `Created ${fraCreated} fire-safety to-do${fraCreated === 1 ? "" : "s"}` });
+      } else {
+        toast({ title: "AI review complete" });
+      }
       setOpen(true);
     },
     onError: () => toast({ title: "AI review failed", description: "Please try again.", variant: "destructive" }),
@@ -183,11 +202,17 @@ function CertCard({ propertyId, cert }: { propertyId: number; cert: Certificate 
           <div className="flex items-center gap-2 flex-wrap">
             <span className="font-semibold text-foreground">{certLabel(cert)}</span>
             <span className={`text-[11px] px-2 py-0.5 rounded-full font-medium ${ss.chip}`} data-testid={`cert-status-${cert.id}`}>{ss.label}</span>
+            {cert.certType === "epc" && cert.epcRating && (
+              <span className={`text-[11px] px-2 py-0.5 rounded-full font-bold ${EPC_BAND_STYLE[cert.epcRating] || "bg-muted text-muted-foreground"}`} data-testid={`cert-epc-band-${cert.id}`}>
+                EPC {cert.epcRating}{cert.epcScore ? ` · ${cert.epcScore}` : ""}
+              </span>
+            )}
             {cert.aiOutcome && (
               <span className={`text-[11px] px-2 py-0.5 rounded-full font-medium ${OUTCOME_STYLE[cert.aiOutcome]?.chip || ""}`}>
                 AI: {OUTCOME_STYLE[cert.aiOutcome]?.label || cert.aiOutcome}
               </span>
             )}
+            {roomName && <span className="text-[11px] px-2 py-0.5 rounded-full font-medium bg-secondary text-muted-foreground" data-testid={`cert-room-${cert.id}`}>{roomName}</span>}
           </div>
           <p className="text-xs text-muted-foreground mt-0.5">
             Expires {fmtDate(cert.expiryDate)}
@@ -195,6 +220,8 @@ function CertCard({ propertyId, cert }: { propertyId: number; cert: Certificate 
               <span> · {d < 0 ? `${Math.abs(d)} days overdue` : `in ${d} days`}</span>
             )}
             {cert.provider && <span> · {cert.provider}</span>}
+            {cert.certType === "hmo_licence" && cert.licenceNumber && <span> · Licence {cert.licenceNumber}</span>}
+            {cert.certType === "hmo_licence" && cert.licenceCouncil && <span> · {cert.licenceCouncil}</span>}
           </p>
         </div>
         <button type="button" onClick={() => setOpen((o) => !o)} className="p-1.5 rounded hover-elevate" data-testid={`button-expand-cert-${cert.id}`}>
@@ -276,10 +303,19 @@ function CertEditFields({ propertyId, cert }: { propertyId: number; cert: Certif
   const [expiryDate, setExpiry] = useState(cert.expiryDate);
   const [provider, setProvider] = useState(cert.provider);
   const [reference, setReference] = useState(cert.reference);
+  const [epcRating, setEpcRating] = useState(cert.epcRating);
+  const [epcScore, setEpcScore] = useState(cert.epcScore);
+  const [licenceNumber, setLicenceNumber] = useState(cert.licenceNumber);
+  const [licenceCouncil, setLicenceCouncil] = useState(cert.licenceCouncil);
+  const [maxOccupants, setMaxOccupants] = useState(cert.maxOccupants);
 
   const save = useMutation({
     mutationFn: (extra: Record<string, unknown> = {}) =>
-      apiRequest("PUT", `/api/certificates/${cert.id}`, { issueDate, expiryDate, provider, reference, ...extra }),
+      apiRequest("PUT", `/api/certificates/${cert.id}`, {
+        issueDate, expiryDate, provider, reference,
+        epcRating, epcScore, licenceNumber, licenceCouncil, maxOccupants,
+        ...extra,
+      }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/properties", propertyId, "certificates"] });
       queryClient.invalidateQueries({ queryKey: ["/api/certificates"] });
@@ -300,6 +336,40 @@ function CertEditFields({ propertyId, cert }: { propertyId: number; cert: Certif
         <div className="space-y-1.5"><Label className={labelCls}>Expiry / next due</Label><Input type="date" value={expiryDate} data-testid={`edit-expiry-${cert.id}`} onChange={(e) => setExpiry(e.target.value)} /></div>
         <div className="space-y-1.5"><Label className={labelCls}>Provider / engineer</Label><Input value={provider} data-testid={`edit-provider-${cert.id}`} onChange={(e) => setProvider(e.target.value)} placeholder="Company or engineer" /></div>
         <div className="space-y-1.5"><Label className={labelCls}>Reference / serial</Label><Input value={reference} data-testid={`edit-reference-${cert.id}`} onChange={(e) => setReference(e.target.value)} /></div>
+        {cert.certType === "epc" && (
+          <>
+            <div className="space-y-1.5">
+              <Label className={labelCls}>EPC rating (A–G)</Label>
+              <Select value={epcRating || "none"} onValueChange={(v) => setEpcRating(v === "none" ? "" : v)}>
+                <SelectTrigger data-testid={`edit-epc-rating-${cert.id}`}><SelectValue placeholder="Select band" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">—</SelectItem>
+                  {["A", "B", "C", "D", "E", "F", "G"].map((b) => <SelectItem key={b} value={b}>{b}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label className={labelCls}>EPC score (1–100)</Label>
+              <Input type="number" value={epcScore === 0 ? "" : epcScore} data-testid={`edit-epc-score-${cert.id}`} placeholder="e.g. 72" onChange={(e) => setEpcScore(e.target.value === "" ? 0 : parseInt(e.target.value) || 0)} />
+            </div>
+          </>
+        )}
+        {cert.certType === "hmo_licence" && (
+          <>
+            <div className="space-y-1.5">
+              <Label className={labelCls}>Licence number</Label>
+              <Input value={licenceNumber} data-testid={`edit-licence-number-${cert.id}`} onChange={(e) => setLicenceNumber(e.target.value)} />
+            </div>
+            <div className="space-y-1.5">
+              <Label className={labelCls}>Issuing council</Label>
+              <Input value={licenceCouncil} data-testid={`edit-licence-council-${cert.id}`} placeholder="e.g. Hackney Council" onChange={(e) => setLicenceCouncil(e.target.value)} />
+            </div>
+            <div className="space-y-1.5">
+              <Label className={labelCls}>Max occupants</Label>
+              <Input type="number" value={maxOccupants === 0 ? "" : maxOccupants} data-testid={`edit-max-occupants-${cert.id}`} placeholder="e.g. 5" onChange={(e) => setMaxOccupants(e.target.value === "" ? 0 : parseInt(e.target.value) || 0)} />
+            </div>
+          </>
+        )}
       </div>
       <input ref={fileRef} type="file" accept="application/pdf,image/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) attachFile(f); }} />
       <div className="flex items-center justify-between gap-2">

@@ -23,6 +23,10 @@ export const properties = pgTable("properties", {
 
   footerNote: text("footer_note").notNull().default("We thank you for your custom!"),
 
+  // Multi-room (HMO) flag — when 1, the property has individual rooms underneath
+  // and compliance/utilities/tenants can be attached per room. When 0 it's a single let.
+  isMultiRoom: integer("is_multi_room").notNull().default(0),
+
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
 });
@@ -34,11 +38,29 @@ export type InsertProperty = z.infer<typeof insertPropertySchema>;
 export type Property = typeof properties.$inferSelect;
 
 // ---------------------------------------------------------------------------
+// ROOMS — only for multi-room (HMO) properties. A room is a lettable unit
+// under a parent property. Tenants, certs, utilities & maintenance may attach
+// to a specific room (roomId) or stay at property level (roomId null).
+// ---------------------------------------------------------------------------
+export const rooms = pgTable("rooms", {
+  id: serial("id").primaryKey(),
+  propertyId: integer("property_id").notNull(),
+  name: text("name").notNull().default(""), // e.g. "Room 1", "Loft", "Flat A"
+  description: text("description").notNull().default(""),
+  active: integer("active").notNull().default(1),
+  createdAt: text("created_at").notNull(),
+});
+export const insertRoomSchema = createInsertSchema(rooms).omit({ id: true, createdAt: true });
+export type InsertRoom = z.infer<typeof insertRoomSchema>;
+export type Room = typeof rooms.$inferSelect;
+
+// ---------------------------------------------------------------------------
 // TENANTS — presaved per property; now a full tenant record
 // ---------------------------------------------------------------------------
 export const tenants = pgTable("tenants", {
   id: serial("id").primaryKey(),
   propertyId: integer("property_id").notNull(),
+  roomId: integer("room_id"), // optional: which room this tenant occupies (HMO)
   flat: text("flat").notNull().default(""),
   tenantName: text("tenant_name").notNull().default(""),
   monthlyRent: integer("monthly_rent_pence").notNull().default(0), // pence
@@ -73,6 +95,7 @@ export type Tenant = typeof tenants.$inferSelect;
 export const documents = pgTable("documents", {
   id: serial("id").primaryKey(),
   propertyId: integer("property_id").notNull(),
+  roomId: integer("room_id"), // optional link to a room (HMO)
   tenantId: integer("tenant_id"), // optional link to a tenant
   category: text("category").notNull().default("agreement"), // agreement | other
   title: text("title").notNull().default(""),
@@ -81,6 +104,9 @@ export const documents = pgTable("documents", {
   fileData: text("file_data").notNull().default(""), // base64
   fileSize: integer("file_size").notNull().default(0),
   aiSummary: text("ai_summary").notNull().default(""), // AI-extracted summary of the document
+  // AI extraction for tenancy agreements (review-then-confirm before applying)
+  aiStatus: text("ai_status").notNull().default(""), // "" | done | error
+  aiExtracted: text("ai_extracted").notNull().default("{}"), // JSON of extracted tenancy fields
   createdAt: text("created_at").notNull(),
 });
 
@@ -102,18 +128,29 @@ export const CERT_TYPES = [
   "legionella",   // Legionella risk assessment
   "smoke_co",     // Smoke & CO alarm check
   "insurance",    // Buildings/landlord insurance
+  "hmo_licence",  // HMO licence
   "other",
 ] as const;
 
 export const certificates = pgTable("certificates", {
   id: serial("id").primaryKey(),
   propertyId: integer("property_id").notNull(),
+  roomId: integer("room_id"), // optional: cert applies to a specific room (HMO)
   certType: text("cert_type").notNull().default("gas_safety"),
   title: text("title").notNull().default(""), // optional custom label (esp. for 'other')
   provider: text("provider").notNull().default(""), // engineer/company who issued it
   issueDate: text("issue_date").notNull().default(""), // YYYY-MM-DD
   expiryDate: text("expiry_date").notNull().default(""), // YYYY-MM-DD
   reference: text("reference").notNull().default(""), // cert/serial number
+
+  // EPC-specific
+  epcRating: text("epc_rating").notNull().default(""), // A–G band extracted from an EPC
+  epcScore: integer("epc_score").notNull().default(0),  // SAP points 1–100
+
+  // HMO licence-specific
+  licenceNumber: text("licence_number").notNull().default(""),
+  licenceCouncil: text("licence_council").notNull().default(""), // issuing council
+  maxOccupants: integer("max_occupants").notNull().default(0),
 
   // Uploaded file (base64) — optional
   fileName: text("file_name").notNull().default(""),
@@ -151,6 +188,7 @@ export const MAINT_CATEGORIES = [
 export const maintenanceJobs = pgTable("maintenance_jobs", {
   id: serial("id").primaryKey(),
   propertyId: integer("property_id").notNull(),
+  roomId: integer("room_id"), // optional: room affected (HMO)
   tenantId: integer("tenant_id"), // optional: reported by / affecting tenant
   certificateId: integer("certificate_id"), // optional: created from a failed/advisory cert
 
@@ -200,8 +238,56 @@ export const CERT_META: Record<string, { label: string; validityMonths: number |
   legionella: { label: "Legionella Assessment", validityMonths: 24 },
   smoke_co: { label: "Smoke & CO Alarms", validityMonths: 12 },
   insurance: { label: "Landlord Insurance", validityMonths: 12 },
+  hmo_licence: { label: "HMO Licence", validityMonths: 60 },
   other: { label: "Other", validityMonths: null },
 };
+
+// ---------------------------------------------------------------------------
+// FRA ACTIONS — to-dos generated from a Fire Risk Assessment's recommendations,
+// each with a deadline (time limit). Lives in the Compliance area.
+// ---------------------------------------------------------------------------
+export const fraActions = pgTable("fra_actions", {
+  id: serial("id").primaryKey(),
+  propertyId: integer("property_id").notNull(),
+  certificateId: integer("certificate_id"), // the FRA cert it came from
+  action: text("action").notNull().default(""),
+  priority: text("priority").notNull().default("medium"), // low | medium | high
+  dueDate: text("due_date").notNull().default(""), // YYYY-MM-DD deadline
+  status: text("status").notNull().default("open"), // open | done
+  createdAt: text("created_at").notNull(),
+});
+export const insertFraActionSchema = createInsertSchema(fraActions).omit({ id: true, createdAt: true });
+export type InsertFraAction = z.infer<typeof insertFraActionSchema>;
+export type FraAction = typeof fraActions.$inferSelect;
+
+// ---------------------------------------------------------------------------
+// UTILITIES & COUNCIL TAX — per property (or per room for HMOs)
+// ---------------------------------------------------------------------------
+export const UTILITY_TYPES = [
+  "council_tax", "gas", "electricity", "water", "internet", "tv_licence", "other",
+] as const;
+export const UTILITY_LABELS: Record<string, string> = {
+  council_tax: "Council Tax", gas: "Gas", electricity: "Electricity", water: "Water",
+  internet: "Internet/Broadband", tv_licence: "TV Licence", other: "Other",
+};
+export const utilities = pgTable("utilities", {
+  id: serial("id").primaryKey(),
+  propertyId: integer("property_id").notNull(),
+  roomId: integer("room_id"), // optional: utility recorded at room level (HMO)
+  utilityType: text("utility_type").notNull().default("council_tax"),
+  provider: text("provider").notNull().default(""), // supplier or council name
+  accountRef: text("account_ref").notNull().default(""),
+  council_tax_band: text("council_tax_band").notNull().default(""), // A–H (council tax only)
+  annualAmount: integer("annual_amount_pence").notNull().default(0), // pence per year
+  responsibleParty: text("responsible_party").notNull().default("landlord"), // landlord | tenant | included
+  renewalDate: text("renewal_date").notNull().default(""), // YYYY-MM-DD
+  notes: text("notes").notNull().default(""),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+});
+export const insertUtilitySchema = createInsertSchema(utilities).omit({ id: true, createdAt: true, updatedAt: true });
+export type InsertUtility = z.infer<typeof insertUtilitySchema>;
+export type Utility = typeof utilities.$inferSelect;
 
 // ---------------------------------------------------------------------------
 // STATEMENTS — a produced statement, snapshotting all values

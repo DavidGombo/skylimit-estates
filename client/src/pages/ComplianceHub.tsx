@@ -1,9 +1,9 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueries } from "@tanstack/react-query";
 import { useLocation } from "wouter";
-import type { Certificate, Property } from "@shared/schema";
+import type { Certificate, Property, FraAction } from "@shared/schema";
 import { AppShell } from "@/components/AppShell";
-import { certLabel, statusOf, daysUntil, fmtDate, STATUS_STYLE, OUTCOME_STYLE } from "@/lib/compliance";
-import { ShieldCheck, ShieldAlert, ShieldX, ChevronRight } from "lucide-react";
+import { certLabel, statusOf, daysUntil, fmtDate, STATUS_STYLE, OUTCOME_STYLE, FRA_PRIORITY_STYLE } from "@/lib/compliance";
+import { ShieldCheck, ShieldAlert, ShieldX, ChevronRight, Flame } from "lucide-react";
 
 export default function ComplianceHub() {
   const [, navigate] = useLocation();
@@ -25,6 +25,18 @@ export default function ComplianceHub() {
     return da - db;
   });
 
+  // Surface open fire-safety (FRA) actions across all properties.
+  const fraQueries = useQueries({
+    queries: (properties ?? []).map((p) => ({
+      queryKey: ["/api/properties", p.id, "fra-actions"] as const,
+      enabled: (properties?.length ?? 0) > 0,
+    })),
+  });
+  const openFra = fraQueries
+    .flatMap((q, i) => ((q.data as FraAction[] | undefined) ?? []).map((a) => ({ ...a, _prop: (properties ?? [])[i] })))
+    .filter((a) => a.status !== "done")
+    .sort((a, b) => (daysUntil(a.dueDate) ?? 99999) - (daysUntil(b.dueDate) ?? 99999));
+
   return (
     <AppShell title="Compliance">
       <div className="grid grid-cols-3 gap-3 mb-6">
@@ -38,6 +50,38 @@ export default function ComplianceHub() {
           </div>
         ))}
       </div>
+
+      {openFra.length > 0 && (
+        <div className="mb-6 rounded-xl border border-card-border bg-card overflow-hidden" data-testid="hub-fra-actions">
+          <div className="flex items-center gap-2 px-4 py-3 border-b border-border bg-red-50 dark:bg-red-900/20">
+            <Flame className="h-4 w-4 text-red-600 dark:text-red-400" />
+            <span className="text-sm font-semibold text-foreground">Open fire-safety actions</span>
+            <span className="text-[11px] px-2 py-0.5 rounded-full font-medium bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300">{openFra.length}</span>
+          </div>
+          <div className="divide-y divide-border">
+            {openFra.map((a) => {
+              const fp = FRA_PRIORITY_STYLE[a.priority] || FRA_PRIORITY_STYLE.medium;
+              const d = daysUntil(a.dueDate);
+              const overdue = d !== null && d < 0;
+              return (
+                <button key={a.id} onClick={() => navigate(`/property/${a.propertyId}`)} className="w-full flex items-center gap-3 p-4 text-left hover-elevate" data-testid={`hub-fra-${a.id}`}>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-sm font-medium text-foreground">{a.action}</span>
+                      <span className={`text-[11px] px-2 py-0.5 rounded-full font-medium ${fp.chip}`}>{fp.label}</span>
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-0.5 truncate">
+                      {a._prop?.propertyAddress || "Property"}
+                      {a.dueDate && <span> · due {fmtDate(a.dueDate)}{d !== null && <span className={overdue ? "text-destructive font-medium" : ""}> · {overdue ? `${Math.abs(d)}d overdue` : `${d}d left`}</span>}</span>}
+                    </p>
+                  </div>
+                  <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" />
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {isLoading && <div className="space-y-2">{[1, 2].map((i) => <div key={i} className="h-16 rounded-lg bg-muted animate-pulse" />)}</div>}
 

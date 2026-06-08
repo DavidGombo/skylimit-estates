@@ -1,9 +1,10 @@
-import { users, statements, properties, tenants, documents, certificates, maintenanceJobs } from '@shared/schema';
+import { users, statements, properties, tenants, documents, certificates, maintenanceJobs, rooms, utilities, fraActions } from '@shared/schema';
 import type {
   User, InsertUser, Statement, InsertStatement,
   Property, InsertProperty, Tenant, InsertTenant,
   Document, InsertDocument, Certificate, InsertCertificate,
   MaintenanceJob, InsertMaintenanceJob,
+  Room, InsertRoom, Utility, InsertUtility, FraAction, InsertFraAction,
 } from '@shared/schema';
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
@@ -40,6 +41,23 @@ export interface IStorage {
   createTenant(data: InsertTenant): Promise<Tenant>;
   updateTenant(id: number, data: Partial<InsertTenant>): Promise<Tenant | undefined>;
   deleteTenant(id: number): Promise<boolean>;
+
+  listRooms(propertyId: number): Promise<Room[]>;
+  getRoom(id: number): Promise<Room | undefined>;
+  createRoom(data: InsertRoom): Promise<Room>;
+  updateRoom(id: number, data: Partial<InsertRoom>): Promise<Room | undefined>;
+  deleteRoom(id: number): Promise<boolean>;
+
+  listUtilities(propertyId: number): Promise<Utility[]>;
+  createUtility(data: InsertUtility): Promise<Utility>;
+  updateUtility(id: number, data: Partial<InsertUtility>): Promise<Utility | undefined>;
+  deleteUtility(id: number): Promise<boolean>;
+
+  listFraActions(propertyId: number): Promise<FraAction[]>;
+  listFraActionsByCert(certificateId: number): Promise<FraAction[]>;
+  createFraAction(data: InsertFraAction): Promise<FraAction>;
+  updateFraAction(id: number, data: Partial<InsertFraAction>): Promise<FraAction | undefined>;
+  deleteFraAction(id: number): Promise<boolean>;
 
   listStatements(): Promise<Statement[]>;
   listStatementsByProperty(propertyId: number): Promise<Statement[]>;
@@ -92,6 +110,9 @@ export class DatabaseStorage implements IStorage {
     await db.delete(documents).where(eq(documents.propertyId, id));
     await db.delete(certificates).where(eq(certificates.propertyId, id));
     await db.delete(maintenanceJobs).where(eq(maintenanceJobs.propertyId, id));
+    await db.delete(rooms).where(eq(rooms.propertyId, id));
+    await db.delete(utilities).where(eq(utilities.propertyId, id));
+    await db.delete(fraActions).where(eq(fraActions.propertyId, id));
     const res = await db.delete(properties).where(eq(properties.id, id)).returning();
     return res.length > 0;
   }
@@ -103,6 +124,34 @@ export class DatabaseStorage implements IStorage {
     return one(await db.update(tenants).set(data).where(eq(tenants.id, id)).returning());
   }
   async deleteTenant(id: number) { return (await db.delete(tenants).where(eq(tenants.id, id)).returning()).length > 0; }
+
+  // ---- Rooms ----
+  async listRooms(propertyId: number) { return db.select().from(rooms).where(eq(rooms.propertyId, propertyId)).orderBy(rooms.id); }
+  async getRoom(id: number) { return one(await db.select().from(rooms).where(eq(rooms.id, id))); }
+  async createRoom(data: InsertRoom) { return one(await db.insert(rooms).values({ ...data, createdAt: now() }).returning())!; }
+  async updateRoom(id: number, data: Partial<InsertRoom>) { return one(await db.update(rooms).set(data).where(eq(rooms.id, id)).returning()); }
+  async deleteRoom(id: number) {
+    // detach references rather than orphaning them
+    await db.update(tenants).set({ roomId: null }).where(eq(tenants.roomId, id));
+    await db.update(certificates).set({ roomId: null }).where(eq(certificates.roomId, id));
+    await db.update(documents).set({ roomId: null }).where(eq(documents.roomId, id));
+    await db.update(maintenanceJobs).set({ roomId: null }).where(eq(maintenanceJobs.roomId, id));
+    await db.delete(utilities).where(eq(utilities.roomId, id));
+    return (await db.delete(rooms).where(eq(rooms.id, id)).returning()).length > 0;
+  }
+
+  // ---- Utilities ----
+  async listUtilities(propertyId: number) { return db.select().from(utilities).where(eq(utilities.propertyId, propertyId)).orderBy(utilities.id); }
+  async createUtility(data: InsertUtility) { return one(await db.insert(utilities).values({ ...data, createdAt: now(), updatedAt: now() }).returning())!; }
+  async updateUtility(id: number, data: Partial<InsertUtility>) { return one(await db.update(utilities).set({ ...data, updatedAt: now() }).where(eq(utilities.id, id)).returning()); }
+  async deleteUtility(id: number) { return (await db.delete(utilities).where(eq(utilities.id, id)).returning()).length > 0; }
+
+  // ---- FRA actions ----
+  async listFraActions(propertyId: number) { return db.select().from(fraActions).where(eq(fraActions.propertyId, propertyId)).orderBy(fraActions.id); }
+  async listFraActionsByCert(certificateId: number) { return db.select().from(fraActions).where(eq(fraActions.certificateId, certificateId)).orderBy(fraActions.id); }
+  async createFraAction(data: InsertFraAction) { return one(await db.insert(fraActions).values({ ...data, createdAt: now() }).returning())!; }
+  async updateFraAction(id: number, data: Partial<InsertFraAction>) { return one(await db.update(fraActions).set(data).where(eq(fraActions.id, id)).returning()); }
+  async deleteFraAction(id: number) { return (await db.delete(fraActions).where(eq(fraActions.id, id)).returning()).length > 0; }
 
   // ---- Statements ----
   async listStatements() { return db.select().from(statements).orderBy(desc(statements.id)); }

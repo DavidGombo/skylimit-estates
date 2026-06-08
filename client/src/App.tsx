@@ -15,6 +15,7 @@ import MaintenanceHub from "@/pages/MaintenanceHub";
 import Finance from "@/pages/Finance";
 import StatementEditor from "@/pages/StatementEditor";
 import StatementPrint from "@/pages/StatementPrint";
+import WorkOrder from "@/pages/WorkOrder";
 
 function AppRouter() {
   return (
@@ -29,6 +30,7 @@ function AppRouter() {
       <Route path="/new/:propertyId" component={StatementEditor} />
       <Route path="/edit/:id" component={StatementEditor} />
       <Route path="/print/:id" component={StatementPrint} />
+      <Route path="/work-order/:id" component={WorkOrder} />
       <Route component={NotFound} />
     </Switch>
   );

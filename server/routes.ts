@@ -6,12 +6,33 @@ import {
   insertStatementSchema, insertPropertySchema, insertTenantSchema,
 } from "@shared/schema";
 import type { RentalRow } from "@shared/schema";
-import { reviewCertificate, troubleshootMaintenance } from "./aiCert";
+import { reviewCertificate, troubleshootMaintenance, extractTenancy } from "./aiCert";
 
 function parseRows(json: string): RentalRow[] {
   try { return JSON.parse(json) as RentalRow[]; } catch { return []; }
 }
 const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
+
+// Month helpers for statement period auto-advance
+const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+function addMonth(y: number, m: number) { // m is 0-indexed
+  return m === 11 ? { y: y + 1, m: 0 } : { y, m: m + 1 };
+}
+// Parse a period label like "June 2026" or "01/06/2026 - 30/06/2026" -> {y,m} of the period month, or null
+function parsePeriodMonth(label: string): { y: number; m: number } | null {
+  if (!label) return null;
+  const named = label.match(/([A-Za-z]+)\s+(\d{4})/);
+  if (named) {
+    const mi = MONTHS.findIndex((mm) => mm.toLowerCase().startsWith(named[1].toLowerCase().slice(0, 3)));
+    if (mi >= 0) return { y: Number(named[2]), m: mi };
+  }
+  const dmy = label.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  if (dmy) return { y: Number(dmy[3]), m: Number(dmy[2]) - 1 };
+  const iso = label.match(/(\d{4})-(\d{2})/);
+  if (iso) return { y: Number(iso[1]), m: Number(iso[2]) - 1 };
+  return null;
+}
+function monthLabel(y: number, m: number) { return `${MONTHS[m]} ${y}`; }
 
 export async function registerRoutes(httpServer: Server, app: Express): Promise<Server> {
   // ---------- Access gate ----------
@@ -68,6 +89,82 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     if (!parsed.success) return res.status(400).json({ message: "Invalid data", errors: parsed.error.flatten() });
     res.status(201).json(await storage.createTenant(parsed.data));
   });
+
+  // ---------- Rooms (multi-room / HMO properties) ----------
+  app.get("/api/properties/:id/rooms", async (req, res) => {
+    res.json(await storage.listRooms(Number(req.params.id)));
+  });
+  app.post("/api/properties/:id/rooms", async (req, res) => {
+    const propertyId = Number(req.params.id);
+    const b = req.body ?? {};
+    res.status(201).json(await storage.createRoom({ propertyId, name: b.name || "Room", description: b.description || "", active: b.active ?? 1 }));
+  });
+  app.put("/api/rooms/:id", async (req, res) => {
+    const patch: Record<string, unknown> = {};
+    for (const k of ["name", "description", "active"] as const) if (k in req.body) patch[k] = req.body[k];
+    const updated = await storage.updateRoom(Number(req.params.id), patch);
+    if (!updated) return res.status(404).json({ message: "Room not found" });
+    res.json(updated);
+  });
+  app.delete("/api/rooms/:id", async (req, res) => {
+    const ok = await storage.deleteRoom(Number(req.params.id));
+    if (!ok) return res.status(404).json({ message: "Room not found" });
+    res.status(204).end();
+  });
+
+  // ---------- Utilities & Council Tax ----------
+  app.get("/api/properties/:id/utilities", async (req, res) => {
+    res.json(await storage.listUtilities(Number(req.params.id)));
+  });
+  app.post("/api/properties/:id/utilities", async (req, res) => {
+    const propertyId = Number(req.params.id);
+    const b = req.body ?? {};
+    res.status(201).json(await storage.createUtility({
+      propertyId, roomId: b.roomId ?? null,
+      utilityType: b.utilityType || "council_tax", provider: b.provider || "",
+      accountRef: b.accountRef || "", council_tax_band: b.council_tax_band || "",
+      annualAmount: b.annualAmount || 0, responsibleParty: b.responsibleParty || "landlord",
+      renewalDate: b.renewalDate || "", notes: b.notes || "",
+    }));
+  });
+  app.put("/api/utilities/:id", async (req, res) => {
+    const patch: Record<string, unknown> = {};
+    for (const k of ["roomId", "utilityType", "provider", "accountRef", "council_tax_band", "annualAmount", "responsibleParty", "renewalDate", "notes"] as const) if (k in req.body) patch[k] = req.body[k];
+    const updated = await storage.updateUtility(Number(req.params.id), patch);
+    if (!updated) return res.status(404).json({ message: "Utility not found" });
+    res.json(updated);
+  });
+  app.delete("/api/utilities/:id", async (req, res) => {
+    const ok = await storage.deleteUtility(Number(req.params.id));
+    if (!ok) return res.status(404).json({ message: "Utility not found" });
+    res.status(204).end();
+  });
+
+  // ---------- FRA actions (fire risk to-dos) ----------
+  app.get("/api/properties/:id/fra-actions", async (req, res) => {
+    res.json(await storage.listFraActions(Number(req.params.id)));
+  });
+  app.post("/api/properties/:id/fra-actions", async (req, res) => {
+    const propertyId = Number(req.params.id);
+    const b = req.body ?? {};
+    res.status(201).json(await storage.createFraAction({
+      propertyId, certificateId: b.certificateId ?? null,
+      action: b.action || "", priority: b.priority || "medium",
+      dueDate: b.dueDate || "", status: b.status || "open",
+    }));
+  });
+  app.put("/api/fra-actions/:id", async (req, res) => {
+    const patch: Record<string, unknown> = {};
+    for (const k of ["action", "priority", "dueDate", "status"] as const) if (k in req.body) patch[k] = req.body[k];
+    const updated = await storage.updateFraAction(Number(req.params.id), patch);
+    if (!updated) return res.status(404).json({ message: "Action not found" });
+    res.json(updated);
+  });
+  app.delete("/api/fra-actions/:id", async (req, res) => {
+    const ok = await storage.deleteFraAction(Number(req.params.id));
+    if (!ok) return res.status(404).json({ message: "Action not found" });
+    res.status(204).end();
+  });
   // All tenants across properties (for the Tenants hub)
   app.get("/api/tenants", async (_req, res) => {
     const props = await storage.listProperties();
@@ -80,7 +177,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
   app.put("/api/tenants/:id", async (req, res) => {
     const allowed = ([
-      "flat", "tenantName", "monthlyRent", "active",
+      "flat", "tenantName", "monthlyRent", "active", "roomId",
       "email", "phone", "tenancyStart", "tenancyEnd",
       "depositAmount", "depositScheme", "idReference", "notes",
     ] as const);
@@ -120,12 +217,32 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       }
     }
 
+    // Auto-advance the rental period: read the latest statement's period and
+    // move forward one calendar month. If none, default to the current month.
+    let nextPeriod = "";
+    let nextFrom = "";
+    let nextTo = "";
+    const baseMonth = (() => {
+      if (latest) {
+        const fromRows = parseRows(latest.rentalRows).map((r) => parsePeriodMonth(r.rentalPeriod)).find(Boolean) as { y: number; m: number } | undefined;
+        const prev = fromRows || parsePeriodMonth(latest.periodFrom) || parsePeriodMonth(latest.periodTo);
+        if (prev) return addMonth(prev.y, prev.m);
+      }
+      const now = new Date();
+      return { y: now.getFullYear(), m: now.getMonth() };
+    })();
+    nextPeriod = monthLabel(baseMonth.y, baseMonth.m);
+    const pad = (n: number) => String(n).padStart(2, "0");
+    const lastDay = new Date(baseMonth.y, baseMonth.m + 1, 0).getDate();
+    nextFrom = `${baseMonth.y}-${pad(baseMonth.m + 1)}-01`;
+    nextTo = `${baseMonth.y}-${pad(baseMonth.m + 1)}-${pad(lastDay)}`;
+
     const rentalRows: RentalRow[] = tenantList.map(t => {
       const rent = round2((t.monthlyRent || 0) / 100);
       const bf = round2(carryByTenant.get(t.id) || 0);
       return {
         tenantId: t.id,
-        rentalPeriod: "",
+        rentalPeriod: nextPeriod,
         flat: t.flat,
         tenantName: t.tenantName,
         balanceBf: bf,
@@ -134,7 +251,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       };
     });
 
-    res.json({ property, rentalRows });
+    res.json({ property, rentalRows, nextPeriod, periodFrom: nextFrom, periodTo: nextTo });
   });
 
   // ---------- Documents (per property; tenancy agreements & files) ----------
@@ -155,6 +272,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
     const doc = await storage.createDocument({
       propertyId,
+      roomId: req.body?.roomId ?? null,
       tenantId: tenantId ?? null,
       category: category || "agreement",
       title: title || fileName || "Document",
@@ -163,6 +281,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       fileData,
       fileSize: fileSize || 0,
       aiSummary: "",
+      aiStatus: "",
+      aiExtracted: "{}",
     });
     const { fileData: _omit, ...rest } = doc;
     res.status(201).json(rest);
@@ -180,6 +300,39 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     const ok = await storage.deleteDocument(Number(req.params.id));
     if (!ok) return res.status(404).json({ message: "Not found" });
     res.status(204).end();
+  });
+
+  // AI extract tenancy terms from an uploaded agreement (review-then-confirm)
+  app.post("/api/documents/:id/ai-extract", async (req, res) => {
+    const id = Number(req.params.id);
+    const doc = await storage.getDocument(id);
+    if (!doc) return res.status(404).json({ message: "Document not found" });
+    if (!doc.fileData) return res.status(400).json({ message: "No file to read" });
+    try {
+      const buf = Buffer.from(doc.fileData, "base64");
+      const isPdf = (doc.mimeType || "").includes("pdf") || (doc.fileName || "").toLowerCase().endsWith(".pdf");
+      let extract;
+      if (isPdf) {
+        const { PDFParse } = await import("pdf-parse");
+        const parser = new PDFParse({ data: buf });
+        const parsed = await parser.getText();
+        await parser.destroy().catch(() => {});
+        const text = ((parsed as any).text || "").trim();
+        if (!text) {
+          await storage.updateDocument(id, { aiStatus: "error" });
+          return res.status(422).json({ message: "This PDF has no readable text (it may be a scan). Enter details manually." });
+        }
+        extract = await extractTenancy({ pdfText: text });
+      } else {
+        extract = await extractTenancy({ imageBase64: doc.fileData, imageMime: doc.mimeType });
+      }
+      await storage.updateDocument(id, { aiStatus: "done", aiExtracted: JSON.stringify(extract), aiSummary: extract.summary });
+      res.json(extract); // returned for review; client confirms before applying to tenant
+    } catch (err: any) {
+      console.error("Tenancy AI extract failed:", err?.message || err);
+      await storage.updateDocument(id, { aiStatus: "error" });
+      res.status(500).json({ message: "AI extraction failed", detail: err?.message });
+    }
   });
 
   // ---------- Certificates / Compliance ----------
@@ -225,12 +378,18 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
     const cert = await storage.createCertificate({
       propertyId,
+      roomId: b.roomId ?? null,
       certType: b.certType || "gas_safety",
       title: b.title || "",
       provider: b.provider || "",
       issueDate: b.issueDate || "",
       expiryDate: b.expiryDate || "",
       reference: b.reference || "",
+      epcRating: b.epcRating || "",
+      epcScore: b.epcScore || 0,
+      licenceNumber: b.licenceNumber || "",
+      licenceCouncil: b.licenceCouncil || "",
+      maxOccupants: b.maxOccupants || 0,
       fileName: b.fileName || "",
       mimeType: b.mimeType || "",
       fileData: b.fileData || "",
@@ -243,7 +402,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
   app.put("/api/certificates/:id", async (req, res) => {
     const allowed = ([
-      "certType", "title", "provider", "issueDate", "expiryDate", "reference", "notes",
+      "roomId", "certType", "title", "provider", "issueDate", "expiryDate", "reference", "notes",
+      "epcRating", "epcScore", "licenceNumber", "licenceCouncil", "maxOccupants",
       "fileName", "mimeType", "fileData", "fileSize",
     ] as const);
     const patch: Record<string, unknown> = {};
@@ -286,7 +446,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         const text = ((parsed as any).text || "").trim();
         if (!text) {
           // scanned PDF with no text layer
-          review = { outcome: "unknown" as const, summary: "This PDF has no readable text (it may be a scan). Please enter the dates manually, or upload a clearer copy.", recommendations: [], extractedExpiry: "", extractedIssue: "", provider: "", reference: "" };
+          review = { outcome: "unknown" as const, summary: "This PDF has no readable text (it may be a scan). Please enter the dates manually, or upload a clearer copy.", recommendations: [], extractedExpiry: "", extractedIssue: "", provider: "", reference: "", epcRating: "", epcScore: 0, licenceNumber: "", licenceCouncil: "", maxOccupants: 0, fraActions: [] };
         } else {
           review = await reviewCertificate({ certType: cert.certType, pdfText: text });
         }
@@ -305,9 +465,35 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       if (!cert.issueDate && review.extractedIssue) patch.issueDate = review.extractedIssue;
       if (!cert.provider && review.provider) patch.provider = review.provider;
       if (!cert.reference && review.reference) patch.reference = review.reference;
+      // EPC rating/score
+      if (!cert.epcRating && review.epcRating) patch.epcRating = review.epcRating;
+      if (!cert.epcScore && review.epcScore) patch.epcScore = review.epcScore;
+      // HMO licence fields
+      if (!cert.licenceNumber && review.licenceNumber) patch.licenceNumber = review.licenceNumber;
+      if (!cert.licenceCouncil && review.licenceCouncil) patch.licenceCouncil = review.licenceCouncil;
+      if (!cert.maxOccupants && review.maxOccupants) patch.maxOccupants = review.maxOccupants;
       const updated = await storage.updateCertificate(id, patch);
+
+      // FRA: auto-create dated to-dos from extracted recommendations (only once)
+      let fraCreated = 0;
+      if (cert.certType === "fire_risk" && review.fraActions.length) {
+        const existing = await storage.listFraActionsByCert(id);
+        if (existing.length === 0) {
+          const today = new Date();
+          for (const a of review.fraActions) {
+            const due = a.timeLimitDays != null
+              ? new Date(today.getTime() + a.timeLimitDays * 86400000).toISOString().slice(0, 10)
+              : "";
+            await storage.createFraAction({
+              propertyId: cert.propertyId, certificateId: id,
+              action: a.action, priority: a.priority, dueDate: due, status: "open",
+            });
+            fraCreated++;
+          }
+        }
+      }
       const { fileData, ...rest } = updated!;
-      res.json(rest);
+      res.json({ ...rest, fraCreated });
     } catch (err: any) {
       console.error("AI review failed:", err?.message || err);
       await storage.updateCertificate(id, { aiStatus: "error", aiSummary: "AI review could not be completed. " + (err?.message || "") });
@@ -325,6 +511,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     const b = req.body ?? {};
     const job = await storage.createMaintenance({
       propertyId,
+      roomId: b.roomId ?? null,
       tenantId: b.tenantId ?? null,
       certificateId: b.certificateId ?? null,
       category: b.category || "other",
@@ -343,7 +530,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   app.put("/api/maintenance/:id", async (req, res) => {
     const allowed = ([
       "category", "title", "description", "priority", "status",
-      "reportedDate", "completedDate", "contractor", "cost", "tenantId",
+      "reportedDate", "completedDate", "contractor", "cost", "tenantId", "roomId",
     ] as const);
     const patch: Record<string, unknown> = {};
     for (const k of allowed) if (k in req.body) patch[k] = req.body[k];
@@ -364,8 +551,11 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     try {
       const r = await troubleshootMaintenance({ category: job.category, title: job.title, description: job.description });
       const updated = await storage.updateMaintenance(id, {
-        aiStatus: "done", aiDiagnosis: r.diagnosis, aiSteps: JSON.stringify(r.steps),
-        aiUrgency: r.urgency, aiAdvice: r.advice,
+        aiStatus: "done", aiDiagnosis: r.diagnosis,
+        aiSteps: JSON.stringify(r.steps),
+        aiUrgency: r.urgency,
+        // pack the enhanced fields into aiAdvice as JSON so we don't need new columns
+        aiAdvice: JSON.stringify({ advice: r.advice, likelyCauses: r.likelyCauses, trade: r.trade, partsLikely: r.partsLikely, estimatedCost: r.estimatedCost, preventMeasures: r.preventMeasures }),
       });
       res.json(updated);
     } catch (err: any) {

@@ -9,7 +9,26 @@ export const CERT_META: Record<string, { label: string; validityMonths: number |
   legionella: { label: "Legionella Assessment", validityMonths: 24 },
   smoke_co: { label: "Smoke & CO Alarms", validityMonths: 12 },
   insurance: { label: "Landlord Insurance", validityMonths: 12 },
+  hmo_licence: { label: "HMO Licence", validityMonths: 60 },
   other: { label: "Other", validityMonths: null },
+};
+
+// EPC rating band colours (A best → G worst)
+export const EPC_BAND_STYLE: Record<string, string> = {
+  A: "bg-emerald-600 text-white",
+  B: "bg-green-500 text-white",
+  C: "bg-lime-500 text-white",
+  D: "bg-yellow-400 text-black",
+  E: "bg-amber-500 text-white",
+  F: "bg-orange-500 text-white",
+  G: "bg-red-600 text-white",
+};
+
+// Shared priority chip styling for FRA actions (low | medium | high)
+export const FRA_PRIORITY_STYLE: Record<string, { label: string; chip: string }> = {
+  low: { label: "Low", chip: "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300" },
+  medium: { label: "Medium", chip: "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300" },
+  high: { label: "High", chip: "bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300" },
 };
 
 export function certLabel(c: Pick<Certificate, "certType" | "title">): string {

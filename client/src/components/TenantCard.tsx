@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import type { Tenant } from "@shared/schema";
+import type { Tenant, Room } from "@shared/schema";
 import { penceToPounds, poundsToPence, gbp } from "@/lib/statement";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -17,7 +17,7 @@ import { ChevronDown, Trash2, Save, User } from "lucide-react";
 
 const labelCls = "text-xs font-medium text-muted-foreground";
 
-export function TenantCard({ propertyId, tenant }: { propertyId: number; tenant: Tenant }) {
+export function TenantCard({ propertyId, tenant, rooms = [], isMultiRoom = false }: { propertyId: number; tenant: Tenant; rooms?: Room[]; isMultiRoom?: boolean }) {
   const { toast } = useToast();
   const [open, setOpen] = useState(false);
   const [t, setT] = useState<Tenant>(tenant);
@@ -25,7 +25,7 @@ export function TenantCard({ propertyId, tenant }: { propertyId: number; tenant:
 
   const save = useMutation({
     mutationFn: () => apiRequest("PUT", `/api/tenants/${tenant.id}`, {
-      flat: t.flat, tenantName: t.tenantName, monthlyRent: t.monthlyRent, active: t.active,
+      flat: t.flat, tenantName: t.tenantName, monthlyRent: t.monthlyRent, active: t.active, roomId: t.roomId,
       email: t.email, phone: t.phone, tenancyStart: t.tenancyStart, tenancyEnd: t.tenancyEnd,
       depositAmount: t.depositAmount, depositScheme: t.depositScheme, idReference: t.idReference, notes: t.notes,
     }),
@@ -81,6 +81,18 @@ export function TenantCard({ propertyId, tenant }: { propertyId: number; tenant:
               <Label className={labelCls}>Tenant name</Label>
               <Input value={t.tenantName} data-testid={`input-name-${tenant.id}`} onChange={(e) => set({ tenantName: e.target.value })} />
             </div>
+            {isMultiRoom && (
+              <div className="space-y-1.5">
+                <Label className={labelCls}>Room</Label>
+                <Select value={t.roomId == null ? "none" : String(t.roomId)} onValueChange={(v) => set({ roomId: v === "none" ? null : Number(v) })}>
+                  <SelectTrigger data-testid={`select-room-${tenant.id}`}><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Whole property</SelectItem>
+                    {rooms.map((r) => <SelectItem key={r.id} value={String(r.id)}>{r.name || `Room ${r.id}`}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
             <div className="space-y-1.5">
               <Label className={labelCls}>Email</Label>
               <Input type="email" value={t.email} data-testid={`input-email-${tenant.id}`} onChange={(e) => set({ email: e.target.value })} placeholder="tenant@email.com" />

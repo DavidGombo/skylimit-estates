@@ -10,10 +10,51 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
-import { Plus, Trash2, Save, Printer, AlertTriangle } from "lucide-react";
+import { Plus, Trash2, Save, Printer, AlertTriangle, ChevronLeft, ChevronRight } from "lucide-react";
 
 function parseRows<T>(json: string): T[] {
   try { return JSON.parse(json) as T[]; } catch { return []; }
+}
+
+const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+
+// Recognise a month from a "April 2026" / "01/04/2026" / "2026-04" style label.
+function parsePeriodMonth(label: string): { y: number; m: number } | null {
+  if (!label) return null;
+  const named = label.match(/([A-Za-z]+)\s+(\d{4})/);
+  if (named) {
+    const mi = MONTHS.findIndex((mm) => mm.toLowerCase().startsWith(named[1].toLowerCase().slice(0, 3)));
+    if (mi >= 0) return { y: Number(named[2]), m: mi };
+  }
+  const dmy = label.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  if (dmy) return { y: Number(dmy[3]), m: Number(dmy[2]) - 1 };
+  const iso = label.match(/(\d{4})-(\d{2})/);
+  if (iso) return { y: Number(iso[1]), m: Number(iso[2]) - 1 };
+  return null;
+}
+const pad2 = (n: number) => String(n).padStart(2, "0");
+// Display period dates as DD.MM.YYYY to match the on-statement style.
+function isoToUk(iso: string): string {
+  const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  return m ? `${m[3]}.${m[2]}.${m[1]}` : iso;
+}
+// Shift a "from/to" UK or ISO date string by `delta` calendar months, preserving its display style.
+function shiftDateMonths(value: string, delta: number, end: boolean): string {
+  const pm = parsePeriodMonth(value) || (() => { const d = value.match(/(\d{1,2})[./](\d{1,2})[./](\d{4})/); return d ? { y: Number(d[3]), m: Number(d[2]) - 1 } : null; })();
+  if (!pm) return value;
+  const total = pm.y * 12 + pm.m + delta;
+  const y = Math.floor(total / 12), m = ((total % 12) + 12) % 12;
+  const day = end ? new Date(y, m + 1, 0).getDate() : 1;
+  const sep = value.includes("/") ? "/" : ".";
+  return `${pad2(day)}${sep}${pad2(m + 1)}${sep}${y}`;
+}
+function shiftLabelMonths(label: string, delta: number): string {
+  const pm = parsePeriodMonth(label);
+  if (!pm) return label;
+  const total = pm.y * 12 + pm.m + delta;
+  const y = Math.floor(total / 12), m = ((total % 12) + 12) % 12;
+  // Preserve a "Month YYYY" style; otherwise rebuild as a month label.
+  return `${MONTHS[m]} ${y}`;
 }
 const emptyRental: RentalRow = { tenantId: null, rentalPeriod: "", flat: "", tenantName: "", balanceBf: 0, rentDemanded: 0, rentPaid: 0 };
 const emptyDisb: DisbursementRow = { supplier: "", invoiceNumber: "", description: "", invoiceAmount: 0, invoiceDate: "", balance: 0 };
@@ -67,7 +108,7 @@ export default function StatementEditor() {
   // EDIT mode: load existing statement
   const { data: existing } = useQuery<Statement>({ queryKey: ["/api/statements", editingId], enabled: isEditing });
   // NEW mode: load prepared rows for the property
-  const { data: prepared } = useQuery<{ property: Property; rentalRows: RentalRow[] }>({
+  const { data: prepared } = useQuery<{ property: Property; rentalRows: RentalRow[]; nextPeriod: string; periodFrom: string; periodTo: string }>({
     queryKey: ["/api/properties", newPropertyId, "prepare"],
     queryFn: async () => (await apiRequest("GET", `/api/properties/${newPropertyId}/prepare`)).json(),
     enabled: !isEditing && newPropertyId != null,
@@ -100,9 +141,18 @@ export default function StatementEditor() {
       setFooterNote(p.footerNote); setFeePercent(p.managementFeePercent);
       setFeeBase(p.managementFeeBase as FeeBase);
       setRentalRows(prepared.rentalRows.length ? prepared.rentalRows : [{ ...emptyRental }]);
+      if (prepared.periodFrom) setPeriodFrom(isoToUk(prepared.periodFrom));
+      if (prepared.periodTo) setPeriodTo(isoToUk(prepared.periodTo));
       setLoaded(true);
     }
   }, [prepared, loaded]);
+
+  // Shift the whole statement period (all rental-row labels + from/to dates) by one calendar month.
+  function shiftPeriod(delta: number) {
+    setRentalRows((rows) => rows.map((r) => ({ ...r, rentalPeriod: shiftLabelMonths(r.rentalPeriod, delta) })));
+    setPeriodFrom((v) => shiftDateMonths(v, delta, false));
+    setPeriodTo((v) => shiftDateMonths(v, delta, true));
+  }
 
   const totals = computeTotals({ rentalRows, disbursementRows: disbRows, managementFeePercent: feePercent, managementFeeBase: feeBase });
 
@@ -173,7 +223,18 @@ export default function StatementEditor() {
       <main className="mx-auto max-w-5xl px-6 py-7 space-y-6">
         {/* Statement details */}
         <section className={card}>
-          <h2 className="text-sm font-semibold text-foreground mb-4">Statement details</h2>
+          <div className="flex items-center justify-between mb-4 gap-3 flex-wrap">
+            <h2 className="text-sm font-semibold text-foreground">Statement details</h2>
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs text-muted-foreground mr-1">Shift period</span>
+              <Button variant="outline" size="sm" data-testid="button-period-prev" onClick={() => shiftPeriod(-1)}>
+                <ChevronLeft className="h-3.5 w-3.5 mr-1" /> Prev month
+              </Button>
+              <Button variant="outline" size="sm" data-testid="button-period-next" onClick={() => shiftPeriod(1)}>
+                Next month <ChevronRight className="h-3.5 w-3.5 ml-1" />
+              </Button>
+            </div>
+          </div>
           <div className="grid sm:grid-cols-2 gap-4">
             <div className="space-y-1.5">
               <Label className={labelCls}>Property address</Label>
