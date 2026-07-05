@@ -27,8 +27,10 @@ export function round2(n: number): number {
 }
 
 export function computeTotals(input: StatementInput): StatementTotals {
+  // A row marked "already transferred" has had its rent paid out to the landlord
+  // separately, so it's deducted from the rent due counted here (excluded from Total Income).
   const totalIncome = round2(
-    input.rentalRows.reduce((sum, r) => sum + (r.rentPaid || 0), 0)
+    input.rentalRows.reduce((sum, r) => sum + (r.transferred ? 0 : (r.rentPaid || 0)), 0)
   );
   const totalDisbursements = round2(
     input.disbursementRows.reduce((sum, d) => sum + (d.invoiceAmount || 0), 0)

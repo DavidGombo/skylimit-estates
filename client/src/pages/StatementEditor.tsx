@@ -9,6 +9,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useToast } from "@/hooks/use-toast";
 import { Plus, Trash2, Save, Printer, AlertTriangle, ChevronLeft, ChevronRight } from "lucide-react";
 
@@ -56,7 +58,7 @@ function shiftLabelMonths(label: string, delta: number): string {
   // Preserve a "Month YYYY" style; otherwise rebuild as a month label.
   return `${MONTHS[m]} ${y}`;
 }
-const emptyRental: RentalRow = { tenantId: null, rentalPeriod: "", flat: "", tenantName: "", balanceBf: 0, rentDemanded: 0, rentPaid: 0 };
+const emptyRental: RentalRow = { tenantId: null, rentalPeriod: "", flat: "", tenantName: "", balanceBf: 0, rentDemanded: 0, rentPaid: 0, transferred: false };
 const emptyDisb: DisbursementRow = { supplier: "", invoiceNumber: "", description: "", invoiceAmount: 0, invoiceDate: "", balance: 0 };
 
 function todayUK() {
@@ -277,15 +279,18 @@ export default function StatementEditor() {
           </div>
           <p className="text-xs text-muted-foreground mb-3">Rent is pre-filled from each tenant. For a defaulter, change <span className="font-medium">Rent Received</span> to what they actually paid — the shortfall carries to Arrears C/F and forward to next month.</p>
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[860px] text-sm">
+            <table className="w-full min-w-[940px] text-sm">
               <thead>
                 <tr className="text-left text-xs text-muted-foreground border-b border-border">
                   <th className="py-2 pr-2 font-medium w-[16%]">Rental period</th>
-                  <th className="py-2 px-2 font-medium w-[8%]">Flat</th>
-                  <th className="py-2 px-2 font-medium w-[20%]">Tenant name</th>
+                  <th className="py-2 px-2 font-medium w-[7%]">Flat</th>
+                  <th className="py-2 px-2 font-medium w-[18%]">Tenant name</th>
                   <th className="py-2 px-2 font-medium">Rent Due</th>
                   <th className="py-2 px-2 font-medium">Rent Received</th>
                   <th className="py-2 px-2 font-medium">Arrears B/F</th>
+                  <th className="py-2 px-2 font-medium text-center w-[9%]">
+                    <Tooltip><TooltipTrigger asChild><span className="cursor-help underline decoration-dotted">Transferred</span></TooltipTrigger><TooltipContent>Tick if this rent has already been paid out to the landlord — it's then deducted from the rent due total.</TooltipContent></Tooltip>
+                  </th>
                   <th className="py-2 px-2 font-medium text-right">Arrears C/F</th>
                   <th className="py-2 pl-2 w-8"></th>
                 </tr>
@@ -302,7 +307,11 @@ export default function StatementEditor() {
                       <td className="py-2 px-2"><NumberCell value={row.rentDemanded} onChange={(n) => updateRental(i, { rentDemanded: n })} testId={`input-due-${i}`} /></td>
                       <td className="py-2 px-2"><NumberCell value={row.rentPaid} onChange={(n) => updateRental(i, { rentPaid: n })} testId={`input-received-${i}`} /></td>
                       <td className="py-2 px-2"><NumberCell value={row.balanceBf} onChange={(n) => updateRental(i, { balanceBf: n })} testId={`input-bf-${i}`} /></td>
-                      <td className={`py-2 px-2 text-right tabular-nums font-medium ${isDefault ? "text-destructive" : ""}`} data-testid={`text-cf-${i}`}>
+                      <td className="py-2 px-2 text-center">
+                        <Checkbox checked={!!row.transferred} data-testid={`checkbox-transferred-${i}`} aria-label="Already transferred"
+                          onCheckedChange={(v) => updateRental(i, { transferred: v === true })} />
+                      </td>
+                      <td className={`py-2 px-2 text-right tabular-nums font-medium ${row.transferred ? "text-muted-foreground line-through" : isDefault ? "text-destructive" : ""}`} data-testid={`text-cf-${i}`}>
                         <span className="inline-flex items-center gap-1 justify-end">
                           {isDefault && <AlertTriangle className="h-3.5 w-3.5" />}
                           {gbpOrDash(cf)}

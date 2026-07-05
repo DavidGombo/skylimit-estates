@@ -76,7 +76,13 @@ export const tenants = pgTable("tenants", {
   depositAmount: integer("deposit_amount_pence").notNull().default(0), // pence
   depositScheme: text("deposit_scheme").notNull().default(""), // DPS / MyDeposits / TDS
   idReference: text("id_reference").notNull().default(""), // passport/right-to-rent ref
+  niNumber: text("ni_number").notNull().default(""), // National Insurance number (from tenancy agreement)
   notes: text("notes").notNull().default(""),
+
+  // Rent-in-arrears period template. Each tenant's rent covers a fixed offset
+  // window (e.g. 02/05 – 01/06). Statements shift this forward one month each run.
+  rentPeriodStart: text("rent_period_start").notNull().default(""), // YYYY-MM-DD (base start)
+  rentPeriodEnd: text("rent_period_end").notNull().default(""),     // YYYY-MM-DD (base end)
 
   createdAt: text("created_at").notNull(),
 });
@@ -328,6 +334,7 @@ export const rentalRowSchema = z.object({
   balanceBf: z.number().default(0),
   rentDemanded: z.number().default(0),
   rentPaid: z.number().default(0),
+  transferred: z.boolean().default(false), // "already transferred" — when true, rent is deducted from rent due
 });
 export type RentalRow = z.infer<typeof rentalRowSchema>;
 

@@ -28,6 +28,7 @@ export function TenantCard({ propertyId, tenant, rooms = [], isMultiRoom = false
       flat: t.flat, tenantName: t.tenantName, monthlyRent: t.monthlyRent, active: t.active, roomId: t.roomId,
       email: t.email, phone: t.phone, tenancyStart: t.tenancyStart, tenancyEnd: t.tenancyEnd,
       depositAmount: t.depositAmount, depositScheme: t.depositScheme, idReference: t.idReference, notes: t.notes,
+      niNumber: t.niNumber, rentPeriodStart: t.rentPeriodStart, rentPeriodEnd: t.rentPeriodEnd,
     }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/properties", propertyId, "tenants"] });
@@ -136,6 +137,18 @@ export function TenantCard({ propertyId, tenant, rooms = [], isMultiRoom = false
             <div className="space-y-1.5">
               <Label className={labelCls}>ID / Right-to-rent ref</Label>
               <Input value={t.idReference} data-testid={`input-id-${tenant.id}`} onChange={(e) => set({ idReference: e.target.value })} placeholder="Passport / share code" />
+            </div>
+            <div className="space-y-1.5">
+              <Label className={labelCls}>NI number</Label>
+              <Input value={t.niNumber || ""} data-testid={`input-ni-${tenant.id}`} onChange={(e) => set({ niNumber: e.target.value.toUpperCase() })} placeholder="QQ 12 34 56 C" />
+            </div>
+            <div className="space-y-1.5">
+              <Label className={labelCls}>Rent period start (base)</Label>
+              <Input type="date" value={t.rentPeriodStart || ""} data-testid={`input-rpstart-${tenant.id}`} onChange={(e) => set({ rentPeriodStart: e.target.value })} />
+            </div>
+            <div className="space-y-1.5">
+              <Label className={labelCls}>Rent period end (base)</Label>
+              <Input type="date" value={t.rentPeriodEnd || ""} data-testid={`input-rpend-${tenant.id}`} onChange={(e) => set({ rentPeriodEnd: e.target.value })} />
             </div>
             <div className="space-y-1.5">
               <Label className={labelCls}>Status</Label>

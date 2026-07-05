@@ -34,6 +34,28 @@ function parsePeriodMonth(label: string): { y: number; m: number } | null {
 }
 function monthLabel(y: number, m: number) { return `${MONTHS[m]} ${y}`; }
 
+// ---- Per-tenant rent-in-arrears period helpers ----
+// The seeded base dates correspond to the FIRST statement month (the anchor).
+// Each subsequent monthly statement shifts every tenant's range +1 month.
+const RENT_PERIOD_ANCHOR = { y: 2026, m: 6 }; // July 2026 (0-indexed month 6) = the statement these base dates were given for
+function pad2(n: number) { return String(n).padStart(2, "0"); }
+// Shift an ISO date (YYYY-MM-DD) forward by `months`, preserving day-of-month (clamped to month length).
+function shiftIsoByMonths(iso: string, months: number): string {
+  const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return iso;
+  let y = Number(m[1]); let mo = Number(m[2]) - 1; const d = Number(m[3]);
+  const total = y * 12 + mo + months;
+  y = Math.floor(total / 12); mo = total % 12;
+  const lastDay = new Date(y, mo + 1, 0).getDate();
+  const day = Math.min(d, lastDay);
+  return `${y}-${pad2(mo + 1)}-${pad2(day)}`;
+}
+// Format ISO YYYY-MM-DD as DD/MM/YYYY for display
+function isoToDMY(iso: string): string {
+  const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  return m ? `${m[3]}/${m[2]}/${m[1]}` : iso;
+}
+
 export async function registerRoutes(httpServer: Server, app: Express): Promise<Server> {
   // ---------- Access gate ----------
   // Require a shared access key on every /api request when ACCESS_KEY is set.
@@ -192,7 +214,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     const allowed = ([
       "flat", "tenantName", "monthlyRent", "active", "roomId",
       "email", "phone", "tenancyStart", "tenancyEnd",
-      "depositAmount", "depositScheme", "idReference", "notes",
+      "depositAmount", "depositScheme", "idReference", "niNumber", "notes",
+      "rentPeriodStart", "rentPeriodEnd",
     ] as const);
     const patch: Record<string, unknown> = {};
     for (const k of allowed) if (k in req.body) patch[k] = req.body[k];
@@ -237,8 +260,10 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     let nextTo = "";
     const baseMonth = (() => {
       if (latest) {
-        const fromRows = parseRows(latest.rentalRows).map((r) => parsePeriodMonth(r.rentalPeriod)).find(Boolean) as { y: number; m: number } | undefined;
-        const prev = fromRows || parsePeriodMonth(latest.periodFrom) || parsePeriodMonth(latest.periodTo);
+        // Anchor off the statement's OWN period month (not the per-tenant arrears
+        // date range) so the monthly cadence doesn't drift. periodFrom is ISO.
+        const prev = parsePeriodMonth(latest.periodFrom) || parsePeriodMonth(latest.periodTo)
+          || (parseRows(latest.rentalRows).map((r) => parsePeriodMonth(r.rentalPeriod)).find(Boolean) as { y: number; m: number } | undefined);
         if (prev) return addMonth(prev.y, prev.m);
       }
       const now = new Date();
@@ -250,17 +275,30 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     nextFrom = `${baseMonth.y}-${pad(baseMonth.m + 1)}-01`;
     nextTo = `${baseMonth.y}-${pad(baseMonth.m + 1)}-${pad(lastDay)}`;
 
+    // How many months to shift each tenant's arrears window: difference between
+    // the target statement month and the anchor month (July 2026).
+    const monthsToShift = (baseMonth.y * 12 + baseMonth.m) - (RENT_PERIOD_ANCHOR.y * 12 + RENT_PERIOD_ANCHOR.m);
+
     const rentalRows: RentalRow[] = tenantList.map(t => {
       const rent = round2((t.monthlyRent || 0) / 100);
       const bf = round2(carryByTenant.get(t.id) || 0);
+      // If the tenant has an arrears period template, shift it and show the exact
+      // DD/MM/YYYY – DD/MM/YYYY range. Otherwise fall back to the month label.
+      let period = nextPeriod;
+      if (t.rentPeriodStart && t.rentPeriodEnd) {
+        const from = shiftIsoByMonths(t.rentPeriodStart, monthsToShift);
+        const to = shiftIsoByMonths(t.rentPeriodEnd, monthsToShift);
+        period = `${isoToDMY(from)} – ${isoToDMY(to)}`;
+      }
       return {
         tenantId: t.id,
-        rentalPeriod: nextPeriod,
+        rentalPeriod: period,
         flat: t.flat,
         tenantName: t.tenantName,
         balanceBf: bf,
         rentDemanded: rent,
         rentPaid: rent, // assume paid in full; user adjusts defaulters
+        transferred: false,
       };
     });
 
