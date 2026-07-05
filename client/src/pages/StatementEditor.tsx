@@ -11,6 +11,10 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
 import { Plus, Trash2, Save, Printer, AlertTriangle, ChevronLeft, ChevronRight } from "lucide-react";
 
@@ -109,6 +113,8 @@ export default function StatementEditor() {
 
   // EDIT mode: load existing statement
   const { data: existing } = useQuery<Statement>({ queryKey: ["/api/statements", editingId], enabled: isEditing });
+  // All statements — used to detect a duplicate for the same property + period
+  const { data: allStatements } = useQuery<Statement[]>({ queryKey: ["/api/statements"] });
   // NEW mode: load prepared rows for the property
   const { data: prepared } = useQuery<{ property: Property; rentalRows: RentalRow[]; nextPeriod: string; periodFrom: string; periodTo: string }>({
     queryKey: ["/api/properties", newPropertyId, "prepare"],
@@ -179,39 +185,54 @@ export default function StatementEditor() {
     return null;
   }
 
-  async function persist(): Promise<Statement> {
+  // Persist. `targetId` overrides the destination row (used when replacing a duplicate).
+  async function persist(opts: { targetId?: number }): Promise<Statement> {
     const payload = buildPayload();
-    const res = isEditing
-      ? await apiRequest("PUT", `/api/statements/${editingId}`, payload)
+    const id = opts.targetId ?? editingId;
+    const res = id != null
+      ? await apiRequest("PUT", `/api/statements/${id}`, payload)
       : await apiRequest("POST", "/api/statements", payload);
     return res.json();
   }
 
-  const save = useMutation({
-    mutationFn: persist,
-    onSuccess: (saved) => {
+  // after="edit" -> go to editor; after="print" -> go to print view
+  const [afterSave, setAfterSave] = useState<"edit" | "print">("edit");
+  // The two-step confirm flow
+  const [confirmSaveOpen, setConfirmSaveOpen] = useState(false);   // "Save this statement?"
+  const [replaceTarget, setReplaceTarget] = useState<Statement | null>(null); // duplicate found -> "Replace?"
+
+  const saveMut = useMutation({
+    mutationFn: (opts: { targetId?: number }) => persist(opts),
+    onSuccess: (saved, vars) => {
       queryClient.invalidateQueries({ queryKey: ["/api/statements"] });
-      toast({ title: isEditing ? "Statement updated" : "Statement saved" });
+      if (afterSave === "print") { navigate(`/print/${saved.id}`); return; }
+      toast({ title: vars.targetId != null && !isEditing ? "Statement replaced" : isEditing ? "Statement updated" : "Statement saved" });
       navigate(`/edit/${saved.id}`);
     },
     onError: () => toast({ title: "Could not save", variant: "destructive" }),
   });
-  const savePrint = useMutation({
-    mutationFn: persist,
-    onSuccess: (saved) => {
-      queryClient.invalidateQueries({ queryKey: ["/api/statements"] });
-      navigate(`/print/${saved.id}`);
-    },
-    onError: () => toast({ title: "Could not save", variant: "destructive" }),
-  });
 
-  function handleSave() {
-    const err = validate(); if (err) return toast({ title: "Check the form", description: err, variant: "destructive" });
-    save.mutate();
+  // Find an existing statement for the same property + exact period (new statements only)
+  function findDuplicate(): Statement | null {
+    if (isEditing) return null;
+    return (allStatements ?? []).find(
+      (s) => s.propertyId === propertyId && s.periodFrom === periodFrom && s.periodTo === periodTo,
+    ) ?? null;
   }
-  function handleSavePrint() {
+
+  // Entry point for both buttons: validate, then ask "Save this statement?"
+  function requestSave(after: "edit" | "print") {
     const err = validate(); if (err) return toast({ title: "Check the form", description: err, variant: "destructive" });
-    savePrint.mutate();
+    setAfterSave(after);
+    setConfirmSaveOpen(true);
+  }
+
+  // User confirmed "Save" -> either save directly, or (if a duplicate exists) ask to replace
+  function onConfirmSave() {
+    setConfirmSaveOpen(false);
+    const dup = findDuplicate();
+    if (dup) { setReplaceTarget(dup); return; }
+    saveMut.mutate({});
   }
 
   const labelCls = "text-xs font-medium text-muted-foreground";
@@ -455,15 +476,56 @@ export default function StatementEditor() {
             <span className="font-bold text-primary tabular-nums">{gbp(totals.profitTransferable)}</span>
           </div>
           <div className="flex gap-2 ml-auto">
-            <Button variant="outline" data-testid="button-save" onClick={handleSave} disabled={save.isPending}>
-              <Save className="h-4 w-4 mr-1.5" /> {save.isPending ? "Saving…" : "Save"}
+            <Button variant="outline" data-testid="button-save" onClick={() => requestSave("edit")} disabled={saveMut.isPending}>
+              <Save className="h-4 w-4 mr-1.5" /> {saveMut.isPending ? "Saving…" : "Save"}
             </Button>
-            <Button className="bg-primary text-primary-foreground" data-testid="button-save-print" onClick={handleSavePrint} disabled={savePrint.isPending}>
+            <Button className="bg-primary text-primary-foreground" data-testid="button-save-print" onClick={() => requestSave("print")} disabled={saveMut.isPending}>
               <Printer className="h-4 w-4 mr-1.5" /> Save & generate PDF
             </Button>
           </div>
         </div>
       </div>
+
+      {/* Confirm: Save this statement? */}
+      <AlertDialog open={confirmSaveOpen} onOpenChange={setConfirmSaveOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Save this statement?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {isEditing
+                ? "Save your changes to this statement."
+                : `This will save the statement for ${propertyAddress || "this property"} (${periodFrom} to ${periodTo}) to Finance.`}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel data-testid="button-cancel-save">Cancel</AlertDialogCancel>
+            <AlertDialogAction data-testid="button-confirm-save" onClick={onConfirmSave}>Save</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Confirm: a statement for this period already exists — replace? */}
+      <AlertDialog open={replaceTarget != null} onOpenChange={(o) => { if (!o) setReplaceTarget(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Replace the existing statement?</AlertDialogTitle>
+            <AlertDialogDescription>
+              A statement for {propertyAddress || "this property"} covering {periodFrom} – {periodTo} already exists.
+              Replace it with this one, or keep both?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <Button variant="outline" data-testid="button-keep-both"
+              onClick={() => { const t = replaceTarget; setReplaceTarget(null); if (t) saveMut.mutate({}); }}>
+              Keep both
+            </Button>
+            <AlertDialogAction data-testid="button-confirm-replace"
+              onClick={() => { const t = replaceTarget; setReplaceTarget(null); if (t) saveMut.mutate({ targetId: t.id }); }}>
+              Replace
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
