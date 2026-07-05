@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useLocation } from "wouter";
-import { apiRequest, queryClient } from "@/lib/queryClient";
+import { apiRequest, queryClient, getAccessKey } from "@/lib/queryClient";
 import type { Property, Statement, RentalRow, DisbursementRow } from "@shared/schema";
 import { AppShell } from "@/components/AppShell";
 import { HubStat } from "@/components/HubStat";
@@ -16,9 +16,17 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useToast } from "@/hooks/use-toast";
-import { FileText, FileOutput, Pencil, Printer, Trash2, PoundSterling, Building2 } from "lucide-react";
+import { FileText, FileOutput, Pencil, Printer, Trash2, PoundSterling, Building2, Archive, Download } from "lucide-react";
 
 function parseRows<T>(j: string): T[] { try { return JSON.parse(j) as T[]; } catch { return []; } }
+
+const API_BASE = "__PORT_5000__".startsWith("__") ? "" : "__PORT_5000__";
+function docFileUrl(docId: number) {
+  const key = getAccessKey();
+  return `${API_BASE}/api/documents/${docId}/file${key ? `?key=${encodeURIComponent(key)}` : ""}`;
+}
+
+type ArchiveDoc = { id: number; propertyId: number; propertyAddress: string; title: string; fileName: string; createdAt: string };
 
 export default function Finance() {
   const [, navigate] = useLocation();
@@ -27,6 +35,7 @@ export default function Finance() {
 
   const { data: properties } = useQuery<Property[]>({ queryKey: ["/api/properties"] });
   const { data: statements, isLoading } = useQuery<Statement[]>({ queryKey: ["/api/statements"] });
+  const { data: archive } = useQuery<ArchiveDoc[]>({ queryKey: ["/api/statement-archive"] });
 
   const del = useMutation({
     mutationFn: (id: number) => apiRequest("DELETE", `/api/statements/${id}`),
@@ -75,6 +84,7 @@ export default function Finance() {
         <HubStat label="Total transferable" count={gbp(totalTransferable)} icon={PoundSterling} tone="neutral" />
         <HubStat label="Total rent collected" count={gbp(totalIncome)} icon={PoundSterling} tone="neutral" />
         <HubStat label="Statements produced" count={statements?.length ?? 0} icon={FileText} tone="neutral" />
+        <HubStat label="Archived (from email)" count={archive?.length ?? 0} icon={Archive} tone="neutral" />
       </div>
 
       <p className="text-xs font-medium text-muted-foreground mb-2 uppercase tracking-wide">Statements</p>
@@ -128,6 +138,47 @@ export default function Finance() {
           );
         })}
       </div>
+
+      {/* Archived statements imported from email, grouped by property */}
+      {(archive?.length ?? 0) > 0 && (() => {
+        const byProp = new Map<string, ArchiveDoc[]>();
+        for (const d of archive!) {
+          const arr = byProp.get(d.propertyAddress) ?? [];
+          arr.push(d); byProp.set(d.propertyAddress, arr);
+        }
+        // month sort key from title like "... 2026-05 ..."
+        const monthKey = (t: string) => (t.match(/(\d{4})-(\d{2})/)?.[0] ?? "");
+        return (
+          <div className="mt-8">
+            <div className="flex items-center gap-2 mb-2">
+              <Archive className="h-4 w-4 text-muted-foreground" />
+              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Statement archive (imported from email)</p>
+            </div>
+            <p className="text-xs text-muted-foreground mb-3">Original signed statements you previously sent, filed by property and month. Click any to view or download.</p>
+            <div className="space-y-4">
+              {Array.from(byProp.entries()).sort((a, b) => a[0].localeCompare(b[0])).map(([addr, docs]) => (docs && (
+                <div key={addr} className="rounded-xl border border-card-border bg-card p-4">
+                  <div className="flex items-center gap-2 mb-3">
+                    <Building2 className="h-4 w-4 text-primary shrink-0" />
+                    <span className="text-sm font-semibold text-foreground">{addr}</span>
+                    <span className="text-xs px-2 py-0.5 rounded-full bg-secondary text-secondary-foreground">{docs.length}</span>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {docs.slice().sort((a: ArchiveDoc, b: ArchiveDoc) => monthKey(b.title).localeCompare(monthKey(a.title))).map((d: ArchiveDoc) => (
+                      <a key={d.id} href={docFileUrl(d.id)} target="_blank" rel="noreferrer" data-testid={`archive-doc-${d.id}`}
+                        className="flex items-center gap-2.5 rounded-lg border border-card-border p-2.5 hover-elevate">
+                        <FileText className="h-4 w-4 text-primary shrink-0" />
+                        <span className="text-sm text-foreground flex-1 truncate">{d.title.replace(/^Rent Statement — /, "")}</span>
+                        <Download className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                      </a>
+                    ))}
+                  </div>
+                </div>
+              )))}
+            </div>
+          </div>
+        );
+      })()}
     </AppShell>
   );
 }

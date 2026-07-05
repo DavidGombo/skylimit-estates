@@ -68,6 +68,7 @@ export interface IStorage {
   deleteStatement(id: number): Promise<boolean>;
 
   listDocuments(propertyId: number): Promise<Document[]>;
+  listAllStatementDocs(): Promise<Array<Pick<Document, 'id'|'propertyId'|'category'|'title'|'fileName'|'mimeType'|'fileSize'|'createdAt'>>>;
   getDocument(id: number): Promise<Document | undefined>;
   createDocument(data: InsertDocument): Promise<Document>;
   updateDocument(id: number, data: Partial<InsertDocument>): Promise<Document | undefined>;
@@ -167,6 +168,14 @@ export class DatabaseStorage implements IStorage {
 
   // ---- Documents ----
   async listDocuments(propertyId: number) { return db.select().from(documents).where(eq(documents.propertyId, propertyId)).orderBy(desc(documents.id)); }
+  // All 'statement' category docs across properties, metadata only (no base64 fileData)
+  async listAllStatementDocs() {
+    return db.select({
+      id: documents.id, propertyId: documents.propertyId, category: documents.category,
+      title: documents.title, fileName: documents.fileName, mimeType: documents.mimeType,
+      fileSize: documents.fileSize, createdAt: documents.createdAt,
+    }).from(documents).where(eq(documents.category, 'statement')).orderBy(desc(documents.id));
+  }
   async getDocument(id: number) { return one(await db.select().from(documents).where(eq(documents.id, id))); }
   async createDocument(data: InsertDocument) { return one(await db.insert(documents).values({ ...data, createdAt: now() }).returning())!; }
   async updateDocument(id: number, data: Partial<InsertDocument>) {

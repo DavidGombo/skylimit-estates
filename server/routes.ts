@@ -305,6 +305,15 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     res.json({ property, rentalRows, nextPeriod, periodFrom: nextFrom, periodTo: nextTo });
   });
 
+  // ---------- Statement archive (all imported/sent statement PDFs) ----------
+  // Every 'statement' category document across properties, metadata only + property address.
+  app.get("/api/statement-archive", async (_req, res) => {
+    const props = await storage.listProperties();
+    const propName = new Map(props.map((p) => [p.id, p.propertyAddress]));
+    const docs = await storage.listAllStatementDocs();
+    res.json(docs.map((d) => ({ ...d, propertyAddress: propName.get(d.propertyId) || "Property" })));
+  });
+
   // ---------- Documents (per property; tenancy agreements & files) ----------
   // List omits the heavy base64 file_data for speed.
   app.get("/api/properties/:id/documents", async (req, res) => {
