@@ -1,23 +1,73 @@
+import { useState } from "react";
 import { useRoute, useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import type { Statement, RentalRow, DisbursementRow } from "@shared/schema";
 import { balanceCf, computeTotals, gbp, gbpOrDash } from "@/lib/statement";
 import { Button } from "@/components/ui/button";
-import { ArrowLeft, Printer, Pencil } from "lucide-react";
+import { ArrowLeft, Printer, Pencil, Download } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
 
 function parseRows<T>(json: string): T[] {
   try { return JSON.parse(json) as T[]; } catch { return []; }
 }
 
+const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+// Derive "Month Year" for the statement, preferring the period start date.
+function periodMonthYear(s: Statement): string {
+  const candidates = [s.periodFrom, s.periodTo].filter(Boolean);
+  for (const c of candidates) {
+    // DD/MM/YYYY or DD.MM.YYYY
+    let m = c.match(/\b(\d{1,2})[\/.](\d{1,2})[\/.](\d{4})\b/);
+    if (m) return `${MONTHS[Number(m[2]) - 1]} ${m[3]}`;
+    // YYYY-MM-DD
+    m = c.match(/\b(\d{4})-(\d{2})-(\d{2})\b/);
+    if (m) return `${MONTHS[Number(m[2]) - 1]} ${m[1]}`;
+    // "Month YYYY"
+    m = c.match(/([A-Za-z]+)\s+(\d{4})/);
+    if (m) { const i = MONTHS.findIndex((mm) => mm.toLowerCase().startsWith(m![1].toLowerCase().slice(0, 3))); if (i >= 0) return `${MONTHS[i]} ${m[2]}`; }
+  }
+  return "";
+}
+// Build the download filename: "Landlord Rent Statement <address> <Month Year>.pdf"
+function pdfFileName(s: Statement): string {
+  const my = periodMonthYear(s);
+  const raw = `Landlord Rent Statement ${s.propertyAddress}${my ? " " + my : ""}`;
+  // strip characters invalid in filenames
+  return raw.replace(/[\/\\:*?"<>|]/g, " ").replace(/\s+/g, " ").trim() + ".pdf";
+}
+
 export default function StatementPrint() {
   const [, params] = useRoute("/print/:id");
   const [, navigate] = useLocation();
+  const { toast } = useToast();
+  const [downloading, setDownloading] = useState(false);
   const id = params?.id ? Number(params.id) : null;
 
   const { data: s, isLoading } = useQuery<Statement>({
     queryKey: ["/api/statements", id],
     enabled: id != null,
   });
+
+  async function downloadPdf() {
+    if (!s) return;
+    const el = document.getElementById("sheet");
+    if (!el) return;
+    setDownloading(true);
+    try {
+      const html2pdf = (await import("html2pdf.js")).default;
+      await html2pdf().set({
+        margin: 0,
+        filename: pdfFileName(s),
+        image: { type: "jpeg", quality: 0.98 },
+        html2canvas: { scale: 2, useCORS: true, backgroundColor: "#ffffff" },
+        jsPDF: { unit: "mm", format: "a4", orientation: "portrait" },
+      }).from(el).save();
+    } catch (e) {
+      toast({ title: "Could not generate PDF", description: "Try the Print option instead.", variant: "destructive" });
+    } finally {
+      setDownloading(false);
+    }
+  }
 
   if (isLoading || !s) {
     return <div className="min-h-screen flex items-center justify-center text-muted-foreground">Loading statement…</div>;
@@ -43,15 +93,18 @@ export default function StatementPrint() {
             <Button variant="outline" size="sm" data-testid="button-edit-from-print" onClick={() => navigate(`/edit/${s.id}`)}>
               <Pencil className="h-4 w-4 mr-1.5" /> Edit
             </Button>
-            <Button size="sm" className="bg-accent text-accent-foreground hover:bg-accent/90 font-semibold" data-testid="button-print" onClick={() => window.print()}>
-              <Printer className="h-4 w-4 mr-1.5" /> Download / Print PDF
+            <Button variant="outline" size="sm" className="text-sidebar-foreground border-white/25 hover:bg-white/10" data-testid="button-print" onClick={() => window.print()}>
+              <Printer className="h-4 w-4 mr-1.5" /> Print
+            </Button>
+            <Button size="sm" className="bg-accent text-accent-foreground hover:bg-accent/90 font-semibold" data-testid="button-download-pdf" onClick={downloadPdf} disabled={downloading}>
+              <Download className="h-4 w-4 mr-1.5" /> {downloading ? "Preparing…" : "Download PDF"}
             </Button>
           </div>
         </div>
       </div>
 
       <div className="no-print mx-auto max-w-4xl px-6 pt-4 text-center text-sm text-neutral-600">
-        Review the statement below. When the figures are correct, click <span className="font-semibold">Download / Print PDF</span> and choose “Save as PDF”.
+        Review the statement below. Click <span className="font-semibold">Download PDF</span> to save it as <span className="font-semibold">{s ? pdfFileName(s) : ""}</span>.
       </div>
 
       {/* The printable A4 sheet */}
