@@ -65,6 +65,15 @@ export default function StatementPrint() {
     queryKey: ["/api/email-config"],
   });
 
+  // Saved landlord emails for this property
+  const savedEmails: string[] = (() => {
+    if (!property) return [];
+    let list: string[] = [];
+    try { list = JSON.parse(property.landlordEmails || "[]"); } catch { list = []; }
+    if ((!list || list.length === 0) && property.landlordEmail) list = [property.landlordEmail];
+    return list.filter(Boolean);
+  })();
+
   // ---- Send-email dialog state ----
   const [emailOpen, setEmailOpen] = useState(false);
   const [toEmail, setToEmail] = useState("");
@@ -82,10 +91,21 @@ export default function StatementPrint() {
       .replace(/\{month_year\}/gi, periodMonthYear(s) || "");
   }
 
+  // Auto-open the send dialog when arriving from the Send Statements screen (?send=1)
+  useEffect(() => {
+    if (!s) return;
+    const hash = window.location.hash || "";
+    if (/[?&]send=1\b/.test(hash)) {
+      setEmailOpen(true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [s]);
+
   // Prefill the dialog whenever it opens (or the source data changes)
   useEffect(() => {
     if (!emailOpen || !s) return;
-    setToEmail(property?.landlordEmail || "");
+    // Default recipients = all saved landlord emails (comma-separated), else primary
+    setToEmail(savedEmails.length ? savedEmails.join(", ") : (property?.landlordEmail || ""));
     const subj = fillPlaceholders(emailSettings?.defaultSubject || "Rent Statement – {property}");
     const dflt = emailSettings?.defaultBody ||
       "Good afternoon,\n\nPlease find attached the rent statement for {property}.\n\nRent was paid to the Hadar account.\n\nThanks for your custom.\n\nKind regards";
@@ -360,6 +380,31 @@ export default function StatementPrint() {
             <div className="space-y-1.5">
               <Label className="text-xs font-medium text-muted-foreground">To</Label>
               <Input data-testid="input-email-to" type="email" value={toEmail} onChange={(e) => setToEmail(e.target.value)} placeholder="landlord@example.com" />
+              {savedEmails.length > 0 && (
+                <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                  <span className="text-[11px] text-muted-foreground">Saved:</span>
+                  {savedEmails.map((em) => {
+                    const current = toEmail.split(/[,;]/).map((x) => x.trim()).filter(Boolean);
+                    const on = current.includes(em);
+                    return (
+                      <button
+                        key={em}
+                        type="button"
+                        data-testid={`chip-email-${em}`}
+                        onClick={() => {
+                          const set = new Set(current);
+                          if (on) set.delete(em); else set.add(em);
+                          setToEmail(Array.from(set).join(", "));
+                        }}
+                        className={`text-[11px] rounded-full border px-2 py-0.5 transition-colors ${on ? "bg-primary text-primary-foreground border-primary" : "bg-background text-foreground border-neutral-300 hover:bg-neutral-100"}`}
+                      >
+                        {em}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+              <p className="text-[11px] text-muted-foreground">Separate multiple recipients with commas.</p>
             </div>
             <div className="space-y-1.5">
               <Label className="text-xs font-medium text-muted-foreground">Cc (optional)</Label>

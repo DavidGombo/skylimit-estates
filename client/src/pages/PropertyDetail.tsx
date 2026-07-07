@@ -38,15 +38,31 @@ export default function PropertyDetail() {
 
   // property form state
   const [form, setForm] = useState<Partial<Property>>({});
-  useEffect(() => { if (property) setForm(property); }, [property]);
+  // landlord emails as an editable list (parsed from the JSON column; falls back to primary)
+  const [emails, setEmails] = useState<string[]>([]);
+  useEffect(() => {
+    if (property) {
+      setForm(property);
+      let list: string[] = [];
+      try { list = JSON.parse(property.landlordEmails || "[]"); } catch { list = []; }
+      if ((!list || list.length === 0) && property.landlordEmail) list = [property.landlordEmail];
+      setEmails(list.length ? list : [""]);
+    }
+  }, [property]);
+
+  const updateEmail = (i: number, v: string) => setEmails((arr) => arr.map((e, idx) => (idx === i ? v : e)));
+  const addEmail = () => setEmails((arr) => [...arr, ""]);
+  const removeEmail = (i: number) => setEmails((arr) => (arr.length <= 1 ? [""] : arr.filter((_, idx) => idx !== i)));
 
   const saveProp = useMutation({
     mutationFn: async () => {
+      const cleaned = emails.map((e) => e.trim()).filter(Boolean);
       const res = await apiRequest("PUT", `/api/properties/${id}`, {
         propertyAddress: form.propertyAddress ?? "",
         statementTo: form.statementTo ?? "",
         statementToAddress: form.statementToAddress ?? "",
-        landlordEmail: form.landlordEmail ?? "",
+        landlordEmail: cleaned[0] ?? "",
+        landlordEmails: JSON.stringify(cleaned),
         deliveryMethod: form.deliveryMethod ?? "By Email",
         companyName: form.companyName ?? "Skylimit Estates Limited",
         companyAddress: form.companyAddress ?? "",
@@ -214,9 +230,22 @@ export default function PropertyDetail() {
               <Label className={labelCls}>Landlord address (optional)</Label>
               <Input data-testid="input-prop-landlord-address" value={form.statementToAddress ?? ""} onChange={(e) => setForm(f => ({ ...f, statementToAddress: e.target.value }))} placeholder="Shown as 'Address:' under Statement to" />
             </div>
-            <div className="space-y-1.5">
-              <Label className={labelCls}>Landlord email</Label>
-              <Input data-testid="input-prop-landlord-email" type="email" value={form.landlordEmail ?? ""} onChange={(e) => setForm(f => ({ ...f, landlordEmail: e.target.value }))} placeholder="Statements are emailed here" />
+            <div className="space-y-1.5 md:col-span-2">
+              <Label className={labelCls}>Landlord email(s)</Label>
+              <p className="text-[11px] text-muted-foreground -mt-0.5">Statements are emailed to these addresses. Add more than one to also copy an accountant or co-owner.</p>
+              <div className="space-y-2">
+                {emails.map((em, i) => (
+                  <div key={i} className="flex items-center gap-2">
+                    <Input data-testid={`input-prop-landlord-email-${i}`} type="email" value={em} onChange={(e) => updateEmail(i, e.target.value)} placeholder={i === 0 ? "Primary landlord email" : "Additional email"} />
+                    <Button type="button" variant="ghost" size="icon" className="text-destructive hover:text-destructive shrink-0" data-testid={`button-remove-email-${i}`} onClick={() => removeEmail(i)} disabled={emails.length <= 1 && !em}>
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                ))}
+                <Button type="button" variant="outline" size="sm" data-testid="button-add-email" onClick={addEmail}>
+                  <Plus className="h-3.5 w-3.5 mr-1" /> Add another email
+                </Button>
+              </div>
             </div>
             <div className="space-y-1.5">
               <Label className={labelCls}>Delivery method</Label>

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link, useLocation } from "wouter";
 import {
-  LayoutDashboard, Building2, Users, ShieldCheck, Wrench, Plug, PoundSterling, Menu, X,
+  LayoutDashboard, Building2, Users, ShieldCheck, Wrench, Plug, PoundSterling, Menu, X, Send,
 } from "lucide-react";
 import { BrandMark } from "@/components/BrandLogo";
 
@@ -13,6 +13,7 @@ const NAV = [
   { href: "/maintenance", label: "Maintenance", icon: Wrench, match: (p: string) => p.startsWith("/maintenance") },
   { href: "/utilities", label: "Utilities", icon: Plug, match: (p: string) => p.startsWith("/utilities") },
   { href: "/finance", label: "Finance", icon: PoundSterling, match: (p: string) => p.startsWith("/finance") || p.startsWith("/new") || p.startsWith("/edit") || p.startsWith("/print") },
+  { href: "/send", label: "Send Statements", icon: Send, match: (p: string) => p.startsWith("/send") },
 ];
 
 function Logo() {

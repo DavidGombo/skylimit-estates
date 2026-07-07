@@ -10,7 +10,8 @@ export const properties = pgTable("properties", {
   propertyAddress: text("property_address").notNull(),
   statementTo: text("statement_to").notNull().default(""), // landlord / recipient
   statementToAddress: text("statement_to_address").notNull().default(""), // landlord address line
-  landlordEmail: text("landlord_email").notNull().default(""), // landlord email — statements are sent here
+  landlordEmail: text("landlord_email").notNull().default(""), // primary landlord email (kept for compatibility)
+  landlordEmails: text("landlord_emails").notNull().default("[]"), // JSON array of all landlord email addresses
   deliveryMethod: text("delivery_method").notNull().default("By Email"),
 
   // Issuer (defaults to Skylimit)
