@@ -46,6 +46,7 @@ export default function PropertyDetail() {
         propertyAddress: form.propertyAddress ?? "",
         statementTo: form.statementTo ?? "",
         statementToAddress: form.statementToAddress ?? "",
+        landlordEmail: form.landlordEmail ?? "",
         deliveryMethod: form.deliveryMethod ?? "By Email",
         companyName: form.companyName ?? "Skylimit Estates Limited",
         companyAddress: form.companyAddress ?? "",
@@ -212,6 +213,10 @@ export default function PropertyDetail() {
             <div className="space-y-1.5">
               <Label className={labelCls}>Landlord address (optional)</Label>
               <Input data-testid="input-prop-landlord-address" value={form.statementToAddress ?? ""} onChange={(e) => setForm(f => ({ ...f, statementToAddress: e.target.value }))} placeholder="Shown as 'Address:' under Statement to" />
+            </div>
+            <div className="space-y-1.5">
+              <Label className={labelCls}>Landlord email</Label>
+              <Input data-testid="input-prop-landlord-email" type="email" value={form.landlordEmail ?? ""} onChange={(e) => setForm(f => ({ ...f, landlordEmail: e.target.value }))} placeholder="Statements are emailed here" />
             </div>
             <div className="space-y-1.5">
               <Label className={labelCls}>Delivery method</Label>

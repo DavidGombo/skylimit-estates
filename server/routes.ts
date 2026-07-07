@@ -7,6 +7,7 @@ import {
 } from "@shared/schema";
 import type { RentalRow } from "@shared/schema";
 import { reviewCertificate, troubleshootMaintenance, extractTenancy } from "./aiCert";
+import { sendGraphMail, graphConfigStatus } from "./graphMail";
 
 function parseRows(json: string): RentalRow[] {
   try { return JSON.parse(json) as RentalRow[]; } catch { return []; }
@@ -669,6 +670,82 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     const ok = await storage.deleteStatement(Number(req.params.id));
     if (!ok) return res.status(404).json({ message: "Statement not found" });
     res.status(204).end();
+  });
+
+  // ---- Email settings ----
+  app.get("/api/email-settings", async (_req, res) => {
+    res.json(await storage.getEmailSettings());
+  });
+  app.put("/api/email-settings", async (req, res) => {
+    const { fromName, defaultSubject, defaultBody } = req.body || {};
+    const updated = await storage.updateEmailSettings({
+      ...(fromName !== undefined ? { fromName } : {}),
+      ...(defaultSubject !== undefined ? { defaultSubject } : {}),
+      ...(defaultBody !== undefined ? { defaultBody } : {}),
+    });
+    res.json(updated);
+  });
+
+  // ---- Email config status (does the app have Graph credentials?) ----
+  app.get("/api/email-config", async (_req, res) => {
+    const st = graphConfigStatus();
+    res.json({ configured: st.configured, missing: st.missing, sender: st.sender });
+  });
+
+  // ---- Email log ----
+  app.get("/api/statement-emails", async (_req, res) => {
+    res.json(await storage.listStatementEmails());
+  });
+
+  // ---- Send a statement PDF to the landlord via Microsoft Graph ----
+  app.post("/api/statements/:id/email", async (req, res) => {
+    const statementId = Number(req.params.id);
+    const statement = await storage.getStatement(statementId);
+    if (!statement) return res.status(404).json({ message: "Statement not found" });
+
+    const { to, cc, subject, body, pdfBase64, fileName } = req.body || {};
+    const toList: string[] = Array.isArray(to) ? to.filter(Boolean) : (to ? [to] : []);
+    const ccList: string[] = Array.isArray(cc) ? cc.filter(Boolean) : (cc ? [cc] : []);
+
+    if (!toList.length) return res.status(400).json({ message: "At least one recipient email is required." });
+    if (!subject || !body) return res.status(400).json({ message: "Subject and message body are required." });
+    if (!pdfBase64) return res.status(400).json({ message: "The statement PDF is missing." });
+
+    const cfg = graphConfigStatus();
+    if (!cfg.configured) {
+      return res.status(503).json({ message: `Email is not set up yet. Missing: ${cfg.missing.join(", ")}.`, notConfigured: true });
+    }
+
+    const cleanPdf = String(pdfBase64).replace(/^data:.*;base64,/, "");
+    const finalName = (fileName && String(fileName).trim()) || `Landlord Rent Statement ${statement.propertyAddress}.pdf`;
+
+    try {
+      await sendGraphMail({
+        to: toList,
+        cc: ccList,
+        subject,
+        body,
+        attachments: [{ name: finalName, contentType: "application/pdf", contentBytes: cleanPdf }],
+      });
+      await storage.createStatementEmail({
+        statementId,
+        propertyId: statement.propertyId ?? null,
+        toEmail: toList.join(", "),
+        ccEmail: ccList.join(", "),
+        subject, body, fileName: finalName, status: "sent", errorMessage: "",
+      } as any);
+      res.json({ ok: true, sentTo: toList });
+    } catch (e: any) {
+      const msg = e?.message || "Failed to send email";
+      await storage.createStatementEmail({
+        statementId,
+        propertyId: statement.propertyId ?? null,
+        toEmail: toList.join(", "),
+        ccEmail: ccList.join(", "),
+        subject, body, fileName: finalName, status: "error", errorMessage: msg,
+      } as any);
+      res.status(502).json({ message: msg });
+    }
   });
 
   return httpServer;

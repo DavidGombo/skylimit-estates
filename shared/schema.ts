@@ -10,6 +10,7 @@ export const properties = pgTable("properties", {
   propertyAddress: text("property_address").notNull(),
   statementTo: text("statement_to").notNull().default(""), // landlord / recipient
   statementToAddress: text("statement_to_address").notNull().default(""), // landlord address line
+  landlordEmail: text("landlord_email").notNull().default(""), // landlord email — statements are sent here
   deliveryMethod: text("delivery_method").notNull().default("By Email"),
 
   // Issuer (defaults to Skylimit)
@@ -353,6 +354,44 @@ export const insertStatementSchema = createInsertSchema(statements).omit({
 });
 export type InsertStatement = z.infer<typeof insertStatementSchema>;
 export type Statement = typeof statements.$inferSelect;
+
+// ---------------------------------------------------------------------------
+// EMAIL SETTINGS — single-row config for the statement email default wording.
+// The subject/body support {property} and {month_year} placeholders.
+// ---------------------------------------------------------------------------
+export const emailSettings = pgTable("email_settings", {
+  id: serial("id").primaryKey(),
+  fromName: text("from_name").notNull().default("Skylimit Estates"),
+  defaultSubject: text("default_subject").notNull().default("Rent Statement – {property}"),
+  // Default body wording. {property} is replaced with the property address.
+  defaultBody: text("default_body").notNull().default(
+    "Good afternoon,\n\nPlease find attached the rent statement for {property}.\n\nRent was paid to the Hadar account.\n\nThanks for your custom.\n\nKind regards"
+  ),
+  updatedAt: text("updated_at").notNull().default(""),
+});
+export const insertEmailSettingsSchema = createInsertSchema(emailSettings).omit({ id: true, updatedAt: true });
+export type InsertEmailSettings = z.infer<typeof insertEmailSettingsSchema>;
+export type EmailSettings = typeof emailSettings.$inferSelect;
+
+// ---------------------------------------------------------------------------
+// STATEMENT EMAILS — a log of statements emailed to landlords (audit trail)
+// ---------------------------------------------------------------------------
+export const statementEmails = pgTable("statement_emails", {
+  id: serial("id").primaryKey(),
+  statementId: integer("statement_id"),
+  propertyId: integer("property_id"),
+  toEmail: text("to_email").notNull().default(""),
+  ccEmail: text("cc_email").notNull().default(""),
+  subject: text("subject").notNull().default(""),
+  body: text("body").notNull().default(""),
+  fileName: text("file_name").notNull().default(""),
+  status: text("status").notNull().default("sent"), // sent | error
+  errorMessage: text("error_message").notNull().default(""),
+  sentAt: text("sent_at").notNull(),
+});
+export const insertStatementEmailSchema = createInsertSchema(statementEmails).omit({ id: true, sentAt: true });
+export type InsertStatementEmail = z.infer<typeof insertStatementEmailSchema>;
+export type StatementEmail = typeof statementEmails.$inferSelect;
 
 // Keep template users table
 export const users = pgTable("users", {

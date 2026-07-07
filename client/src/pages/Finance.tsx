@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import { apiRequest, queryClient, getAccessKey } from "@/lib/queryClient";
-import type { Property, Statement, RentalRow, DisbursementRow } from "@shared/schema";
+import type { Property, Statement, RentalRow, DisbursementRow, EmailSettings } from "@shared/schema";
 import { AppShell } from "@/components/AppShell";
 import { HubStat } from "@/components/HubStat";
 import { computeTotals, gbp } from "@/lib/statement";
@@ -16,7 +16,10 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useToast } from "@/hooks/use-toast";
-import { FileText, FileOutput, Pencil, Printer, Trash2, PoundSterling, Building2, Archive, Download } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { FileText, FileOutput, Pencil, Printer, Trash2, PoundSterling, Building2, Archive, Download, Mail } from "lucide-react";
 
 function parseRows<T>(j: string): T[] { try { return JSON.parse(j) as T[]; } catch { return []; } }
 
@@ -36,6 +39,23 @@ export default function Finance() {
   const { data: properties } = useQuery<Property[]>({ queryKey: ["/api/properties"] });
   const { data: statements, isLoading } = useQuery<Statement[]>({ queryKey: ["/api/statements"] });
   const { data: archive } = useQuery<ArchiveDoc[]>({ queryKey: ["/api/statement-archive"] });
+  const { data: emailSettings } = useQuery<EmailSettings>({ queryKey: ["/api/email-settings"] });
+  const { data: emailConfig } = useQuery<{ configured: boolean; missing: string[]; sender: string }>({ queryKey: ["/api/email-config"] });
+
+  // Email settings dialog
+  const [emailSetOpen, setEmailSetOpen] = useState(false);
+  const [esSubject, setEsSubject] = useState("");
+  const [esBody, setEsBody] = useState("");
+  const saveEmailSettings = useMutation({
+    mutationFn: () => apiRequest("PUT", "/api/email-settings", { defaultSubject: esSubject, defaultBody: esBody }),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/email-settings"] }); setEmailSetOpen(false); toast({ title: "Email settings saved" }); },
+    onError: () => toast({ title: "Could not save", variant: "destructive" }),
+  });
+  function openEmailSettings() {
+    setEsSubject(emailSettings?.defaultSubject || "Rent Statement – {property}");
+    setEsBody(emailSettings?.defaultBody || "Good afternoon,\n\nPlease find attached the rent statement for {property}.\n\nRent was paid to the Hadar account.\n\nThanks for your custom.\n\nKind regards");
+    setEmailSetOpen(true);
+  }
 
   const del = useMutation({
     mutationFn: (id: number) => apiRequest("DELETE", `/api/statements/${id}`),
@@ -77,7 +97,12 @@ export default function Finance() {
 
   return (
     <AppShell title="Finance">
-      <div className="flex justify-end mb-5">{produceBtn}</div>
+      <div className="flex justify-end gap-2 mb-5">
+        <Button variant="outline" data-testid="button-email-settings" onClick={openEmailSettings}>
+          <Mail className="h-4 w-4 mr-1.5" /> Email settings
+        </Button>
+        {produceBtn}
+      </div>
 
       {/* Totals */}
       <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 mb-6">
@@ -179,6 +204,39 @@ export default function Finance() {
           </div>
         );
       })()}
+      {/* Email settings dialog */}
+      <Dialog open={emailSetOpen} onOpenChange={setEmailSetOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Statement email settings</DialogTitle>
+            <DialogDescription>
+              This default wording is used when you send a statement to a landlord. You can still edit it per email before sending.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="rounded-md border p-3 text-[13px] " style={{ borderColor: emailConfig?.configured ? "#bbf7d0" : "#fcd34d", background: emailConfig?.configured ? "#f0fdf4" : "#fffbeb" }}>
+              {emailConfig?.configured
+                ? <>Sending is active. Statements send from <span className="font-medium">{emailConfig.sender}</span> via your Skylimit Outlook.</>
+                : <>Sending is not set up yet. The default wording is still saved here, ready for when the Microsoft credentials are added.</>}
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs font-medium text-muted-foreground">Default subject</Label>
+              <Input data-testid="input-es-subject" value={esSubject} onChange={(e) => setEsSubject(e.target.value)} />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs font-medium text-muted-foreground">Default message</Label>
+              <Textarea data-testid="input-es-body" value={esBody} onChange={(e) => setEsBody(e.target.value)} rows={9} className="text-[13px] leading-relaxed" />
+              <p className="text-[11px] text-muted-foreground">Use <span className="font-mono">{"{property}"}</span> to insert the property address and <span className="font-mono">{"{month_year}"}</span> for the statement month.</p>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEmailSetOpen(false)}>Cancel</Button>
+            <Button className="bg-primary text-primary-foreground" data-testid="button-save-es" onClick={() => saveEmailSettings.mutate()} disabled={saveEmailSettings.isPending}>
+              {saveEmailSettings.isPending ? "Saving…" : "Save"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </AppShell>
   );
 }

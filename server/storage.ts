@@ -1,10 +1,11 @@
-import { users, statements, properties, tenants, documents, certificates, maintenanceJobs, rooms, utilities, fraActions } from '@shared/schema';
+import { users, statements, properties, tenants, documents, certificates, maintenanceJobs, rooms, utilities, fraActions, emailSettings, statementEmails } from '@shared/schema';
 import type {
   User, InsertUser, Statement, InsertStatement,
   Property, InsertProperty, Tenant, InsertTenant,
   Document, InsertDocument, Certificate, InsertCertificate,
   MaintenanceJob, InsertMaintenanceJob,
   Room, InsertRoom, Utility, InsertUtility, FraAction, InsertFraAction,
+  EmailSettings, InsertEmailSettings, StatementEmail, InsertStatementEmail,
 } from '@shared/schema';
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
@@ -87,6 +88,11 @@ export interface IStorage {
   createMaintenance(data: InsertMaintenanceJob): Promise<MaintenanceJob>;
   updateMaintenance(id: number, data: Partial<InsertMaintenanceJob>): Promise<MaintenanceJob | undefined>;
   deleteMaintenance(id: number): Promise<boolean>;
+
+  getEmailSettings(): Promise<EmailSettings>;
+  updateEmailSettings(data: Partial<InsertEmailSettings>): Promise<EmailSettings>;
+  listStatementEmails(): Promise<StatementEmail[]>;
+  createStatementEmail(data: InsertStatementEmail): Promise<StatementEmail>;
 }
 
 const now = () => new Date().toISOString();
@@ -202,6 +208,25 @@ export class DatabaseStorage implements IStorage {
     return one(await db.update(maintenanceJobs).set({ ...data, updatedAt: now() }).where(eq(maintenanceJobs.id, id)).returning());
   }
   async deleteMaintenance(id: number) { return (await db.delete(maintenanceJobs).where(eq(maintenanceJobs.id, id)).returning()).length > 0; }
+
+  // ---- Email settings (single row, id=1) ----
+  async getEmailSettings() {
+    let row = one(await db.select().from(emailSettings).where(eq(emailSettings.id, 1)));
+    if (!row) {
+      row = one(await db.insert(emailSettings).values({ updatedAt: now() } as any).returning());
+    }
+    return row!;
+  }
+  async updateEmailSettings(data: Partial<InsertEmailSettings>) {
+    await this.getEmailSettings(); // ensure row exists
+    return one(await db.update(emailSettings).set({ ...data, updatedAt: now() }).where(eq(emailSettings.id, 1)).returning())!;
+  }
+
+  // ---- Statement email log ----
+  async listStatementEmails() { return db.select().from(statementEmails).orderBy(desc(statementEmails.id)); }
+  async createStatementEmail(data: InsertStatementEmail) {
+    return one(await db.insert(statementEmails).values({ ...data, sentAt: now() }).returning())!;
+  }
 }
 
 export const storage = new DatabaseStorage();

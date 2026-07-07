@@ -1,11 +1,18 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRoute, useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
-import type { Statement, RentalRow, DisbursementRow } from "@shared/schema";
+import type { Statement, RentalRow, DisbursementRow, Property, EmailSettings } from "@shared/schema";
 import { balanceCf, computeTotals, gbp, gbpOrDash } from "@/lib/statement";
 import { Button } from "@/components/ui/button";
-import { ArrowLeft, Printer, Pencil, Download } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
+} from "@/components/ui/dialog";
+import { ArrowLeft, Printer, Pencil, Download, Send, Loader2, AlertTriangle } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { apiRequest } from "@/lib/queryClient";
 
 function parseRows<T>(json: string): T[] {
   try { return JSON.parse(json) as T[]; } catch { return []; }
@@ -48,6 +55,60 @@ export default function StatementPrint() {
     enabled: id != null,
   });
 
+  // Property (for the landlord email) + email settings (for default wording) + config
+  const { data: property } = useQuery<Property>({
+    queryKey: ["/api/properties", s?.propertyId],
+    enabled: s?.propertyId != null,
+  });
+  const { data: emailSettings } = useQuery<EmailSettings>({ queryKey: ["/api/email-settings"] });
+  const { data: emailConfig } = useQuery<{ configured: boolean; missing: string[]; sender: string }>({
+    queryKey: ["/api/email-config"],
+  });
+
+  // ---- Send-email dialog state ----
+  const [emailOpen, setEmailOpen] = useState(false);
+  const [toEmail, setToEmail] = useState("");
+  const [ccEmail, setCcEmail] = useState("");
+  const [subject, setSubject] = useState("");
+  const [bodyText, setBodyText] = useState("");
+  const [customNote, setCustomNote] = useState("");
+  const [sending, setSending] = useState(false);
+
+  // Apply {property}/{month_year} placeholders in the wording
+  function fillPlaceholders(t: string): string {
+    if (!s) return t;
+    return t
+      .replace(/\{property\}/gi, s.propertyAddress || "")
+      .replace(/\{month_year\}/gi, periodMonthYear(s) || "");
+  }
+
+  // Prefill the dialog whenever it opens (or the source data changes)
+  useEffect(() => {
+    if (!emailOpen || !s) return;
+    setToEmail(property?.landlordEmail || "");
+    const subj = fillPlaceholders(emailSettings?.defaultSubject || "Rent Statement – {property}");
+    const dflt = emailSettings?.defaultBody ||
+      "Good afternoon,\n\nPlease find attached the rent statement for {property}.\n\nRent was paid to the Hadar account.\n\nThanks for your custom.\n\nKind regards";
+    setSubject(subj);
+    setBodyText(fillPlaceholders(dflt));
+    setCustomNote("");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [emailOpen]);
+
+  // Build the statement PDF and return base64 (no data: prefix)
+  async function buildPdfBase64(): Promise<string> {
+    const el = document.getElementById("sheet");
+    if (!el) throw new Error("Statement not ready");
+    const html2pdf = (await import("html2pdf.js")).default;
+    const dataUri = (await html2pdf().set({
+      margin: 0,
+      image: { type: "jpeg", quality: 0.98 },
+      html2canvas: { scale: 2, useCORS: true, backgroundColor: "#ffffff" },
+      jsPDF: { unit: "mm", format: "a4", orientation: "portrait" },
+    }).from(el).outputPdf("datauristring")) as string;
+    return dataUri.replace(/^data:.*;base64,/, "");
+  }
+
   async function downloadPdf() {
     if (!s) return;
     const el = document.getElementById("sheet");
@@ -66,6 +127,44 @@ export default function StatementPrint() {
       toast({ title: "Could not generate PDF", description: "Try the Print option instead.", variant: "destructive" });
     } finally {
       setDownloading(false);
+    }
+  }
+
+  // Compose final body = wording + optional custom addition
+  function composedBody(): string {
+    const note = customNote.trim();
+    if (!note) return bodyText;
+    // Insert the custom note after the greeting/first paragraph, before the sign-off feel:
+    // simplest & clearest — append as its own paragraph before the closing lines.
+    return `${bodyText}\n\n${note}`;
+  }
+
+  async function sendEmail() {
+    if (!s) return;
+    if (!toEmail.trim()) {
+      toast({ title: "Add a recipient", description: "Enter the landlord's email address.", variant: "destructive" });
+      return;
+    }
+    setSending(true);
+    try {
+      const pdfBase64 = await buildPdfBase64();
+      await apiRequest("POST", `/api/statements/${s.id}/email`, {
+        to: toEmail.split(/[,;]/).map((x) => x.trim()).filter(Boolean),
+        cc: ccEmail.split(/[,;]/).map((x) => x.trim()).filter(Boolean),
+        subject,
+        body: composedBody(),
+        pdfBase64,
+        fileName: pdfFileName(s),
+      });
+      toast({ title: "Statement sent", description: `Emailed to ${toEmail}.` });
+      setEmailOpen(false);
+    } catch (e: any) {
+      let msg = "Could not send the email.";
+      try { const j = JSON.parse(e?.message?.split(": ").slice(1).join(": ") || "{}"); if (j.message) msg = j.message; } catch {}
+      if (e?.message && msg === "Could not send the email.") msg = e.message;
+      toast({ title: "Send failed", description: msg, variant: "destructive" });
+    } finally {
+      setSending(false);
     }
   }
 
@@ -96,8 +195,11 @@ export default function StatementPrint() {
             <Button variant="outline" size="sm" className="text-sidebar-foreground border-white/25 hover:bg-white/10" data-testid="button-print" onClick={() => window.print()}>
               <Printer className="h-4 w-4 mr-1.5" /> Print
             </Button>
-            <Button size="sm" className="bg-accent text-accent-foreground hover:bg-accent/90 font-semibold" data-testid="button-download-pdf" onClick={downloadPdf} disabled={downloading}>
+            <Button size="sm" variant="outline" className="text-sidebar-foreground border-white/25 hover:bg-white/10" data-testid="button-download-pdf" onClick={downloadPdf} disabled={downloading}>
               <Download className="h-4 w-4 mr-1.5" /> {downloading ? "Preparing…" : "Download PDF"}
+            </Button>
+            <Button size="sm" className="bg-accent text-accent-foreground hover:bg-accent/90 font-semibold" data-testid="button-send-email" onClick={() => setEmailOpen(true)}>
+              <Send className="h-4 w-4 mr-1.5" /> Send to landlord
             </Button>
           </div>
         </div>
@@ -231,6 +333,64 @@ export default function StatementPrint() {
           </div>
         </div>
       </div>
+
+      {/* Send to landlord dialog */}
+      <Dialog open={emailOpen} onOpenChange={setEmailOpen}>
+        <DialogContent className="max-w-lg no-print">
+          <DialogHeader>
+            <DialogTitle>Send statement to landlord</DialogTitle>
+            <DialogDescription>
+              {emailConfig?.configured
+                ? <>The statement PDF will be attached and sent from {emailConfig.sender || "your Skylimit Outlook"}.</>
+                : "Email sending isn't set up yet — see the note below."}
+            </DialogDescription>
+          </DialogHeader>
+
+          {emailConfig && !emailConfig.configured && (
+            <div className="flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 p-3 text-[13px] text-amber-900">
+              <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
+              <div>
+                Email sending is not configured yet. Once the Microsoft credentials are added, this will send automatically.
+                {emailConfig.missing?.length ? <> Missing: {emailConfig.missing.join(", ")}.</> : null}
+              </div>
+            </div>
+          )}
+
+          <div className="space-y-3">
+            <div className="space-y-1.5">
+              <Label className="text-xs font-medium text-muted-foreground">To</Label>
+              <Input data-testid="input-email-to" type="email" value={toEmail} onChange={(e) => setToEmail(e.target.value)} placeholder="landlord@example.com" />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs font-medium text-muted-foreground">Cc (optional)</Label>
+              <Input data-testid="input-email-cc" value={ccEmail} onChange={(e) => setCcEmail(e.target.value)} placeholder="Separate multiple with commas" />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs font-medium text-muted-foreground">Subject</Label>
+              <Input data-testid="input-email-subject" value={subject} onChange={(e) => setSubject(e.target.value)} />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs font-medium text-muted-foreground">Message</Label>
+              <Textarea data-testid="input-email-body" value={bodyText} onChange={(e) => setBodyText(e.target.value)} rows={8} className="text-[13px] leading-relaxed" />
+              <p className="text-[11px] text-muted-foreground">This is your default wording — edit it here for this email, or change the saved default in Finance → Email settings.</p>
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs font-medium text-muted-foreground">Add a note (optional)</Label>
+              <Textarea data-testid="input-email-custom" value={customNote} onChange={(e) => setCustomNote(e.target.value)} rows={3} placeholder="Anything specific to add for this landlord — appended to the message above." className="text-[13px]" />
+            </div>
+            <div className="rounded-md border border-neutral-200 bg-neutral-50 p-2 text-[12px] text-neutral-600">
+              Attachment: <span className="font-medium text-neutral-800">{pdfFileName(s)}</span>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEmailOpen(false)} data-testid="button-email-cancel">Cancel</Button>
+            <Button onClick={sendEmail} disabled={sending || (emailConfig ? !emailConfig.configured : false)} data-testid="button-email-send" className="bg-accent text-accent-foreground hover:bg-accent/90 font-semibold">
+              {sending ? <><Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> Sending…</> : <><Send className="h-4 w-4 mr-1.5" /> Send statement</>}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <style>{`
         #sheet {
