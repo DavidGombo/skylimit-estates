@@ -205,7 +205,7 @@ export default function StatementPrint() {
       {/* Toolbar — hidden when printing */}
       <div className="no-print sticky top-0 z-20 bg-sidebar text-sidebar-foreground border-b border-sidebar-border">
         <div className="mx-auto max-w-4xl px-6 py-3 flex items-center justify-between">
-          <Button variant="ghost" size="sm" className="text-sidebar-foreground hover:bg-white/10" data-testid="button-back-list" onClick={() => navigate("/")}>
+          <Button variant="ghost" size="sm" className="text-sidebar-foreground hover:bg-white/10" data-testid="button-back-list" onClick={() => navigate("/statements")}>
             <ArrowLeft className="h-4 w-4 mr-1.5" /> All statements
           </Button>
           <div className="flex gap-2">
