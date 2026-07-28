@@ -333,6 +333,12 @@ export default function StatementPrint() {
                   <td className="py-0.5 pr-8 text-right text-neutral-700">Management Fee @{s.managementFeePercent}%</td>
                   <td className="py-0.5 text-right tabular-nums">{gbp(totals.managementFee)}</td>
                 </tr>
+                {totals.alreadyTransferred > 0 && (
+                  <tr>
+                    <td className="py-0.5 pr-8 text-right text-neutral-700">Less: Rent already transferred (paid early)</td>
+                    <td className="py-0.5 text-right tabular-nums">{gbp(totals.alreadyTransferred)}</td>
+                  </tr>
+                )}
                 <tr className="bg-neutral-200">
                   <td className="py-1 px-2 pr-8 text-right font-bold border border-neutral-400">Income Profit Transferable:</td>
                   <td className="py-1 px-2 text-right font-bold tabular-nums border border-neutral-400">{gbp(totals.profitTransferable)}</td>

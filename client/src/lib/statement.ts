@@ -14,6 +14,7 @@ export interface StatementTotals {
   totalDisbursements: number;
   subTotal: number;
   managementFee: number;
+  alreadyTransferred: number; // rent paid early / already transferred to landlord separately
   profitTransferable: number;
 }
 
@@ -27,10 +28,16 @@ export function round2(n: number): number {
 }
 
 export function computeTotals(input: StatementInput): StatementTotals {
-  // A row marked "already transferred" has had its rent paid out to the landlord
-  // separately, so it's deducted from the rent due counted here (excluded from Total Income).
+  // Total Income = ALL rent collected this period, including rent that was paid early
+  // ("already transferred"). Early-paid rent still counts as income received.
   const totalIncome = round2(
-    input.rentalRows.reduce((sum, r) => sum + (r.transferred ? 0 : (r.rentPaid || 0)), 0)
+    input.rentalRows.reduce((sum, r) => sum + (r.rentPaid || 0), 0)
+  );
+  // Rent that has already been transferred to the landlord separately (paid early).
+  // This is shown as income above, then deducted at the bottom so the landlord
+  // isn't paid twice.
+  const alreadyTransferred = round2(
+    input.rentalRows.reduce((sum, r) => sum + (r.transferred ? (r.rentPaid || 0) : 0), 0)
   );
   const totalDisbursements = round2(
     input.disbursementRows.reduce((sum, d) => sum + (d.invoiceAmount || 0), 0)
@@ -38,8 +45,9 @@ export function computeTotals(input: StatementInput): StatementTotals {
   const subTotal = round2(totalIncome - totalDisbursements);
   const feeBaseAmount = input.managementFeeBase === "sub_total" ? subTotal : totalIncome;
   const managementFee = round2(feeBaseAmount * (input.managementFeePercent || 0) / 100);
-  const profitTransferable = round2(subTotal - managementFee);
-  return { totalIncome, totalDisbursements, subTotal, managementFee, profitTransferable };
+  // Income Profit Transferable = Sub Total − Management Fee − Already Transferred (paid early)
+  const profitTransferable = round2(subTotal - managementFee - alreadyTransferred);
+  return { totalIncome, totalDisbursements, subTotal, managementFee, alreadyTransferred, profitTransferable };
 }
 
 export function gbp(n: number): string {

@@ -267,8 +267,13 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           || (parseRows(latest.rentalRows).map((r) => parsePeriodMonth(r.rentalPeriod)).find(Boolean) as { y: number; m: number } | undefined);
         if (prev) return addMonth(prev.y, prev.m);
       }
+      // No prior statement: default to the PREVIOUS calendar month, because a
+      // statement produced in (e.g.) August covers the July period that has just ended.
       const now = new Date();
-      return { y: now.getFullYear(), m: now.getMonth() };
+      const prevMonth = now.getMonth() - 1;
+      const y = prevMonth < 0 ? now.getFullYear() - 1 : now.getFullYear();
+      const m = (prevMonth + 12) % 12;
+      return { y, m };
     })();
     nextPeriod = monthLabel(baseMonth.y, baseMonth.m);
     const pad = (n: number) => String(n).padStart(2, "0");

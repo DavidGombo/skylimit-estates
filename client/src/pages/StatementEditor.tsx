@@ -449,6 +449,9 @@ export default function StatementEditor() {
               <div className="flex justify-between"><span className="text-muted-foreground">Total Disbursements</span><span className="font-medium tabular-nums">−{gbp(totals.totalDisbursements)}</span></div>
               <div className="flex justify-between border-t border-border pt-2"><span className="text-muted-foreground">Sub Total</span><span className="font-medium tabular-nums">{gbp(totals.subTotal)}</span></div>
               <div className="flex justify-between"><span className="text-muted-foreground">Management Fee @{feePercent}%</span><span className="font-medium tabular-nums">−{gbp(totals.managementFee)}</span></div>
+              {totals.alreadyTransferred > 0 && (
+                <div className="flex justify-between"><span className="text-muted-foreground">Less: already transferred (paid early)</span><span className="font-medium tabular-nums">−{gbp(totals.alreadyTransferred)}</span></div>
+              )}
               <div className="flex justify-between border-t-2 border-primary/40 pt-2 mt-1">
                 <span className="font-semibold text-foreground">Income Profit Transferable</span>
                 <span className="font-bold text-primary tabular-nums" data-testid="text-profit">{gbp(totals.profitTransferable)}</span>
