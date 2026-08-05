@@ -343,6 +343,12 @@ export default function StatementPrint() {
                   <td className="py-1 px-2 pr-8 text-right font-bold border border-neutral-400">Income Profit Transferable:</td>
                   <td className="py-1 px-2 text-right font-bold tabular-nums border border-neutral-400">{gbp(totals.profitTransferable)}</td>
                 </tr>
+                {totals.arrearsOutstanding > 0 && (
+                  <tr>
+                    <td className="py-0.5 pt-2 pr-8 text-right text-neutral-600 italic">Arrears outstanding (not yet received):</td>
+                    <td className="py-0.5 pt-2 text-right tabular-nums text-neutral-600 italic">{gbp(totals.arrearsOutstanding)}</td>
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>

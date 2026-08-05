@@ -15,6 +15,7 @@ export interface StatementTotals {
   subTotal: number;
   managementFee: number;
   alreadyTransferred: number; // rent paid early / already transferred to landlord separately
+  arrearsOutstanding: number; // total balance carried forward across all rows (unpaid/owed)
   profitTransferable: number;
 }
 
@@ -45,9 +46,15 @@ export function computeTotals(input: StatementInput): StatementTotals {
   const subTotal = round2(totalIncome - totalDisbursements);
   const feeBaseAmount = input.managementFeeBase === "sub_total" ? subTotal : totalIncome;
   const managementFee = round2(feeBaseAmount * (input.managementFeePercent || 0) / 100);
+  // Total arrears outstanding = sum of each row's carried-forward balance (owed amounts).
+  // Shown for visibility only; it does NOT change the transferable amount, because you
+  // can only transfer rent that was actually received.
+  const arrearsOutstanding = round2(
+    input.rentalRows.reduce((sum, r) => sum + Math.max(0, balanceCf(r)), 0)
+  );
   // Income Profit Transferable = Sub Total − Management Fee − Already Transferred (paid early)
   const profitTransferable = round2(subTotal - managementFee - alreadyTransferred);
-  return { totalIncome, totalDisbursements, subTotal, managementFee, alreadyTransferred, profitTransferable };
+  return { totalIncome, totalDisbursements, subTotal, managementFee, alreadyTransferred, arrearsOutstanding, profitTransferable };
 }
 
 export function gbp(n: number): string {

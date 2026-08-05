@@ -507,6 +507,12 @@ export default function StatementEditor() {
                 <span className="font-semibold text-foreground">Income Profit Transferable</span>
                 <span className="font-bold text-primary tabular-nums" data-testid="text-profit">{gbp(totals.profitTransferable)}</span>
               </div>
+              {totals.arrearsOutstanding > 0 && (
+                <div className="flex justify-between text-muted-foreground italic pt-1">
+                  <span>Arrears outstanding (not yet received)</span>
+                  <span className="tabular-nums" data-testid="text-arrears">{gbp(totals.arrearsOutstanding)}</span>
+                </div>
+              )}
             </div>
           </div>
         </section>
