@@ -27,10 +27,12 @@ function parsePeriodMonth(label: string): { y: number; m: number } | null {
     const mi = MONTHS.findIndex((mm) => mm.toLowerCase().startsWith(named[1].toLowerCase().slice(0, 3)));
     if (mi >= 0) return { y: Number(named[2]), m: mi };
   }
-  const dmy = label.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
-  if (dmy) return { y: Number(dmy[3]), m: Number(dmy[2]) - 1 };
+  // ISO first (YYYY-MM-DD) so it isn't mis-read by the DMY branch.
   const iso = label.match(/(\d{4})-(\d{2})/);
   if (iso) return { y: Number(iso[1]), m: Number(iso[2]) - 1 };
+  // DD/MM/YYYY or DD.MM.YYYY (UK dotted) — accept both separators.
+  const dmy = label.match(/(\d{1,2})[./](\d{1,2})[./](\d{4})/);
+  if (dmy) return { y: Number(dmy[3]), m: Number(dmy[2]) - 1 };
   return null;
 }
 function monthLabel(y: number, m: number) { return `${MONTHS[m]} ${y}`; }
