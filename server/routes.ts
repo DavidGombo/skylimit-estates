@@ -5,12 +5,15 @@ import { storage } from "./storage";
 import {
   insertStatementSchema, insertPropertySchema, insertTenantSchema,
 } from "@shared/schema";
-import type { RentalRow } from "@shared/schema";
+import type { RentalRow, DisbursementRow } from "@shared/schema";
 import { reviewCertificate, troubleshootMaintenance, extractTenancy } from "./aiCert";
 import { sendGraphMail, graphConfigStatus } from "./graphMail";
 
 function parseRows(json: string): RentalRow[] {
   try { return JSON.parse(json) as RentalRow[]; } catch { return []; }
+}
+function parseDisb(json: string): DisbursementRow[] {
+  try { return JSON.parse(json) as DisbursementRow[]; } catch { return []; }
 }
 const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
 
@@ -310,7 +313,22 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       };
     });
 
-    res.json({ property, rentalRows, nextPeriod, periodFrom: nextFrom, periodTo: nextTo });
+    // Carry last month's expenses forward as a starting point: copy supplier,
+    // description and amount, but clear the invoice date + number so the user
+    // enters this month's actuals (and deletes any that don't repeat).
+    let disbursementRows: DisbursementRow[] = [];
+    if (latest) {
+      disbursementRows = parseDisb(latest.disbursementRows).map((d) => ({
+        supplier: d.supplier || "",
+        invoiceNumber: "",
+        description: d.description || "",
+        invoiceAmount: d.invoiceAmount || 0,
+        invoiceDate: "",
+        balance: 0,
+      }));
+    }
+
+    res.json({ property, rentalRows, disbursementRows, nextPeriod, periodFrom: nextFrom, periodTo: nextTo });
   });
 
   // ---------- Statement archive (all imported/sent statement PDFs) ----------

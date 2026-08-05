@@ -157,7 +157,7 @@ export default function StatementEditor() {
   // All statements — used to detect a duplicate for the same property + period
   const { data: allStatements } = useQuery<Statement[]>({ queryKey: ["/api/statements"] });
   // NEW mode: load prepared rows for the property
-  const { data: prepared } = useQuery<{ property: Property; rentalRows: RentalRow[]; nextPeriod: string; periodFrom: string; periodTo: string }>({
+  const { data: prepared } = useQuery<{ property: Property; rentalRows: RentalRow[]; disbursementRows?: DisbursementRow[]; nextPeriod: string; periodFrom: string; periodTo: string }>({
     queryKey: ["/api/properties", newPropertyId, "prepare"],
     queryFn: async () => (await apiRequest("GET", `/api/properties/${newPropertyId}/prepare`)).json(),
     enabled: !isEditing && newPropertyId != null,
@@ -190,6 +190,8 @@ export default function StatementEditor() {
       setFooterNote(p.footerNote); setFeePercent(p.managementFeePercent);
       setFeeBase(p.managementFeeBase as FeeBase);
       setRentalRows(prepared.rentalRows.length ? prepared.rentalRows : [{ ...emptyRental }]);
+      // Carry last month's expenses forward (dates/invoice numbers cleared server-side).
+      if (prepared.disbursementRows && prepared.disbursementRows.length) setDisbRows(prepared.disbursementRows);
       if (prepared.periodFrom) setPeriodFrom(isoToUk(prepared.periodFrom));
       if (prepared.periodTo) setPeriodTo(isoToUk(prepared.periodTo));
       setLoaded(true);
