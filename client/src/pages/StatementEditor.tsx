@@ -54,13 +54,54 @@ function shiftDateMonths(value: string, delta: number, end: boolean): string {
   const sep = value.includes("/") ? "/" : ".";
   return `${pad2(day)}${sep}${pad2(m + 1)}${sep}${y}`;
 }
+// Shift a single DD/MM/YYYY or DD/MM date token by `delta` calendar months,
+// keeping the day-of-month where possible (clamped to the month's last day).
+function shiftDateToken(token: string, delta: number): string | null {
+  const t = token.trim();
+  // DD/MM/YYYY or DD.MM.YYYY
+  let m = t.match(/^(\d{1,2})[./](\d{1,2})[./](\d{4})$/);
+  if (m) {
+    const day = Number(m[1]), mon = Number(m[2]) - 1, yr = Number(m[3]);
+    const total = yr * 12 + mon + delta;
+    const ny = Math.floor(total / 12), nm = ((total % 12) + 12) % 12;
+    const lastDay = new Date(ny, nm + 1, 0).getDate();
+    const sep = t.includes(".") ? "." : "/";
+    return `${pad2(Math.min(day, lastDay))}${sep}${pad2(nm + 1)}${sep}${ny}`;
+  }
+  // DD/MM or DD.MM (no year)
+  m = t.match(/^(\d{1,2})[./](\d{1,2})$/);
+  if (m) {
+    const day = Number(m[1]), mon = Number(m[2]) - 1;
+    const total = mon + delta;
+    const nm = ((total % 12) + 12) % 12;
+    const lastDay = new Date(2025, nm + 1, 0).getDate(); // days in the target month (non-leap ref)
+    const sep = t.includes(".") ? "." : "/";
+    return `${pad2(Math.min(day, lastDay))}${sep}${pad2(nm + 1)}`;
+  }
+  return null;
+}
+
 function shiftLabelMonths(label: string, delta: number): string {
+  if (!label || !label.trim()) return label;
+  // Case 1: a date RANGE like "02/05/2026 – 01/06/2026" or "01/06 - 30/06".
+  // Split on any dash variant and shift each side independently.
+  const parts = label.split(/\s*[–—-]\s*/);
+  if (parts.length === 2) {
+    const a = shiftDateToken(parts[0], delta);
+    const b = shiftDateToken(parts[1], delta);
+    if (a && b) return `${a} – ${b}`;
+  }
+  // Case 2: a single date token.
+  const single = shiftDateToken(label, delta);
+  if (single) return single;
+  // Case 3: a "Month YYYY" label.
   const pm = parsePeriodMonth(label);
-  if (!pm) return label;
-  const total = pm.y * 12 + pm.m + delta;
-  const y = Math.floor(total / 12), m = ((total % 12) + 12) % 12;
-  // Preserve a "Month YYYY" style; otherwise rebuild as a month label.
-  return `${MONTHS[m]} ${y}`;
+  if (pm) {
+    const total = pm.y * 12 + pm.m + delta;
+    const y = Math.floor(total / 12), m = ((total % 12) + 12) % 12;
+    return `${MONTHS[m]} ${y}`;
+  }
+  return label;
 }
 const emptyRental: RentalRow = { tenantId: null, rentalPeriod: "", flat: "", tenantName: "", balanceBf: 0, rentDemanded: 0, rentPaid: 0, transferred: false };
 const emptyDisb: DisbursementRow = { supplier: "", invoiceNumber: "", description: "", invoiceAmount: 0, invoiceDate: "", balance: 0 };
@@ -155,9 +196,19 @@ export default function StatementEditor() {
     }
   }, [prepared, loaded]);
 
-  // Shift the whole statement period (all rental-row labels + from/to dates) by one calendar month.
+  // Shift the whole statement period by one calendar month. When advancing forward
+  // (delta > 0), also roll each tenant's arrears forward: this month's carried-forward
+  // balance becomes next month's brought-forward, and rent received resets to 0 so you
+  // enter what was actually paid. Going back (delta < 0) only shifts the labels/dates.
   function shiftPeriod(delta: number) {
-    setRentalRows((rows) => rows.map((r) => ({ ...r, rentalPeriod: shiftLabelMonths(r.rentalPeriod, delta) })));
+    setRentalRows((rows) => rows.map((r) => {
+      const shifted = { ...r, rentalPeriod: shiftLabelMonths(r.rentalPeriod, delta) };
+      if (delta > 0) {
+        const carried = balanceCf(r); // bf + demanded - paid from the month we're leaving
+        return { ...shifted, balanceBf: carried, rentPaid: 0, transferred: false };
+      }
+      return shifted;
+    }));
     setPeriodFrom((v) => shiftDateMonths(v, delta, false));
     setPeriodTo((v) => shiftDateMonths(v, delta, true));
   }
