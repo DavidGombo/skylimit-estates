@@ -105,7 +105,11 @@ export const documents = pgTable("documents", {
   propertyId: integer("property_id").notNull(),
   roomId: integer("room_id"), // optional link to a room (HMO)
   tenantId: integer("tenant_id"), // optional link to a tenant
-  category: text("category").notNull().default("agreement"), // agreement | other
+  category: text("category").notNull().default("agreement"), // coarse group (see DOC_CATEGORIES) | statement | agreement | other
+  docType: text("doc_type").notNull().default("other"), // fine-grained type (see DOC_TYPES)
+  tenancyStatus: text("tenancy_status").notNull().default("current"), // current | historic
+  sensitive: integer("sensitive").notNull().default(0), // 1 = ID/financial — UI flags it
+  tenantNameSnapshot: text("tenant_name_snapshot").notNull().default(""), // occupant name (esp. for historic / mismatches)
   title: text("title").notNull().default(""),
   fileName: text("file_name").notNull().default(""),
   mimeType: text("mime_type").notNull().default("application/pdf"),
@@ -121,6 +125,48 @@ export const documents = pgTable("documents", {
 export const insertDocumentSchema = createInsertSchema(documents).omit({
   id: true, createdAt: true,
 });
+
+// Canonical document categories (coarse groups for browsing/filtering) + labels.
+export const DOC_CATEGORIES: { value: string; label: string; sensitive?: boolean }[] = [
+  { value: "tenancy_agreement", label: "Tenancy agreement" },
+  { value: "onboarding_letter", label: "Onboarding letter" },
+  { value: "id_verification", label: "ID & verification", sensitive: true },
+  { value: "benefits_uc_hb", label: "UC / Housing Benefit" },
+  { value: "council", label: "Council" },
+  { value: "rent_increase_section13", label: "Rent increase / Section 13" },
+  { value: "landlord_pack", label: "Landlord pack" },
+  { value: "certificate", label: "Certificate" },
+  { value: "financial", label: "Financial" },
+  { value: "statement", label: "Rent statement" },
+  { value: "other", label: "Other" },
+];
+
+// Fine-grained document type -> coarse category + sensitivity. Single source of truth
+// used by the backend to derive category/sensitive from a docType.
+export const DOC_TYPE_MAP: Record<string, { label: string; category: string; sensitive?: boolean }> = {
+  ast: { label: "Tenancy agreement (AST)", category: "tenancy_agreement" },
+  cover_letter: { label: "Cover letter", category: "onboarding_letter" },
+  welcome_letter: { label: "Welcome letter", category: "onboarding_letter" },
+  move_in_letter: { label: "Move-in letter", category: "onboarding_letter" },
+  checklist: { label: "Checklist", category: "onboarding_letter" },
+  photo_id: { label: "Photo ID", category: "id_verification", sensitive: true },
+  passport: { label: "Passport", category: "id_verification", sensitive: true },
+  bank_card: { label: "Bank card", category: "id_verification", sensitive: true },
+  right_to_rent: { label: "Right to rent", category: "id_verification", sensitive: true },
+  uc_document: { label: "Universal Credit", category: "benefits_uc_hb" },
+  hb_document: { label: "Housing Benefit", category: "benefits_uc_hb" },
+  council_form: { label: "Council form", category: "council" },
+  section13: { label: "Section 13 notice", category: "rent_increase_section13" },
+  rent_increase: { label: "Rent increase", category: "rent_increase_section13" },
+  landlord_pack: { label: "Landlord pack", category: "landlord_pack" },
+  certificate_epc: { label: "EPC certificate", category: "certificate" },
+  certificate_gas: { label: "Gas certificate", category: "certificate" },
+  certificate_other: { label: "Certificate", category: "certificate" },
+  bank_statement: { label: "Bank statement", category: "financial", sensitive: true },
+  state_pension: { label: "State pension", category: "financial" },
+  contact_details: { label: "Contact details", category: "other" },
+  other: { label: "Document", category: "other" },
+};
 export type InsertDocument = z.infer<typeof insertDocumentSchema>;
 export type Document = typeof documents.$inferSelect;
 

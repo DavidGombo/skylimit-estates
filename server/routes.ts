@@ -3,7 +3,7 @@ import { createServer } from 'node:http';
 import type { Server } from 'node:http';
 import { storage } from "./storage";
 import {
-  insertStatementSchema, insertPropertySchema, insertTenantSchema,
+  insertStatementSchema, insertPropertySchema, insertTenantSchema, DOC_TYPE_MAP,
 } from "@shared/schema";
 import type { RentalRow, DisbursementRow } from "@shared/schema";
 import { reviewCertificate, troubleshootMaintenance, extractTenancy, extractBankTransactions } from "./aiCert";
@@ -356,7 +356,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
   app.post("/api/properties/:id/documents", async (req, res) => {
     const propertyId = Number(req.params.id);
-    const { tenantId, category, title, fileName, mimeType, fileData, fileSize } = req.body ?? {};
+    const { tenantId, category, docType, tenancyStatus, tenantNameSnapshot, sensitive, title, fileName, mimeType, fileData, fileSize } = req.body ?? {};
     if (!fileData || typeof fileData !== "string") {
       return res.status(400).json({ message: "Missing file data" });
     }
@@ -364,11 +364,20 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     if (fileData.length > 11_000_000) {
       return res.status(413).json({ message: "File too large (max ~8MB)" });
     }
+    // Derive coarse category + sensitivity from the fine-grained docType when possible.
+    const dt = typeof docType === "string" && DOC_TYPE_MAP[docType] ? docType : "other";
+    const mapped = DOC_TYPE_MAP[dt];
+    const derivedCategory = category || mapped.category || "other";
+    const derivedSensitive = sensitive != null ? (sensitive ? 1 : 0) : (mapped.sensitive ? 1 : 0);
     const doc = await storage.createDocument({
       propertyId,
       roomId: req.body?.roomId ?? null,
       tenantId: tenantId ?? null,
-      category: category || "agreement",
+      category: derivedCategory,
+      docType: dt,
+      tenancyStatus: tenancyStatus === "historic" ? "historic" : "current",
+      sensitive: derivedSensitive,
+      tenantNameSnapshot: typeof tenantNameSnapshot === "string" ? tenantNameSnapshot : "",
       title: title || fileName || "Document",
       fileName: fileName || "document.pdf",
       mimeType: mimeType || "application/pdf",
