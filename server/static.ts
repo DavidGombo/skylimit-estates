@@ -11,10 +11,25 @@ export function serveStatic(app: Express) {
     );
   }
 
-  app.use(express.static(distPath));
+  // Serve static files. Content-hashed build assets (/assets/*) can be cached
+  // forever (their filename changes when content changes). Everything else
+  // (notably index.html) must NOT be cached, so after a redeploy the browser
+  // always fetches the current index.html that points at the current JS chunks
+  // — otherwise a stale cached page silently breaks buttons like PDF/email.
+  app.use(express.static(distPath, {
+    etag: true,
+    setHeaders: (res, filePath) => {
+      if (filePath.endsWith(".html")) {
+        res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+      } else if (/[\\/]assets[\\/]/.test(filePath)) {
+        res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+      }
+    },
+  }));
 
-  // fall through to index.html if the file doesn't exist
+  // SPA fallback — always return a fresh, uncached index.html
   app.use("/{*path}", (_req, res) => {
+    res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
     res.sendFile(path.resolve(distPath, "index.html"));
   });
 }
