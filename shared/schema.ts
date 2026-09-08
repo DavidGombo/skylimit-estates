@@ -220,6 +220,7 @@ export const certificates = pgTable("certificates", {
   aiExtractedExpiry: text("ai_extracted_expiry").notNull().default(""), // expiry AI read from doc
 
   notes: text("notes").notNull().default(""),
+  archived: integer("archived").notNull().default(0), // 1 = superseded/historic (kept for record, out of the active list)
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
 });

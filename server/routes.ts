@@ -507,7 +507,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     const allowed = ([
       "roomId", "certType", "title", "provider", "issueDate", "expiryDate", "reference", "notes",
       "epcRating", "epcScore", "licenceNumber", "licenceCouncil", "maxOccupants",
-      "fileName", "mimeType", "fileData", "fileSize",
+      "fileName", "mimeType", "fileData", "fileSize", "archived",
     ] as const);
     const patch: Record<string, unknown> = {};
     for (const k of allowed) if (k in req.body) patch[k] = req.body[k];
