@@ -360,9 +360,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     if (!fileData || typeof fileData !== "string") {
       return res.status(400).json({ message: "Missing file data" });
     }
-    // ~8MB base64 cap to keep the SQLite snapshot reasonable
-    if (fileData.length > 11_000_000) {
-      return res.status(413).json({ message: "File too large (max ~8MB)" });
+    // ~14MB base64 cap (~10.5MB raw) — covers large scanned ID PDFs and email packs
+    if (fileData.length > 20_000_000) {
+      return res.status(413).json({ message: "File too large (max ~14MB)" });
     }
     // Derive coarse category + sensitivity from the fine-grained docType when possible.
     const dt = typeof docType === "string" && DOC_TYPE_MAP[docType] ? docType : "other";
