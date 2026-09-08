@@ -1,4 +1,4 @@
-import { users, statements, properties, tenants, documents, certificates, maintenanceJobs, rooms, utilities, fraActions, emailSettings, statementEmails } from '@shared/schema';
+import { users, statements, properties, tenants, documents, certificates, maintenanceJobs, rooms, utilities, fraActions, emailSettings, statementEmails, bankReconciliations } from '@shared/schema';
 import type {
   User, InsertUser, Statement, InsertStatement,
   Property, InsertProperty, Tenant, InsertTenant,
@@ -6,6 +6,7 @@ import type {
   MaintenanceJob, InsertMaintenanceJob,
   Room, InsertRoom, Utility, InsertUtility, FraAction, InsertFraAction,
   EmailSettings, InsertEmailSettings, StatementEmail, InsertStatementEmail,
+  BankReconciliation, InsertBankReconciliation,
 } from '@shared/schema';
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
@@ -39,6 +40,7 @@ export interface IStorage {
   deleteProperty(id: number): Promise<boolean>;
 
   listTenants(propertyId: number): Promise<Tenant[]>;
+  listAllTenants(): Promise<Tenant[]>;
   createTenant(data: InsertTenant): Promise<Tenant>;
   updateTenant(id: number, data: Partial<InsertTenant>): Promise<Tenant | undefined>;
   deleteTenant(id: number): Promise<boolean>;
@@ -93,6 +95,12 @@ export interface IStorage {
   updateEmailSettings(data: Partial<InsertEmailSettings>): Promise<EmailSettings>;
   listStatementEmails(): Promise<StatementEmail[]>;
   createStatementEmail(data: InsertStatementEmail): Promise<StatementEmail>;
+
+  listReconciliations(): Promise<BankReconciliation[]>;
+  getReconciliation(id: number): Promise<BankReconciliation | undefined>;
+  createReconciliation(data: InsertBankReconciliation): Promise<BankReconciliation>;
+  updateReconciliation(id: number, data: Partial<InsertBankReconciliation>): Promise<BankReconciliation | undefined>;
+  deleteReconciliation(id: number): Promise<boolean>;
 }
 
 const now = () => new Date().toISOString();
@@ -127,6 +135,7 @@ export class DatabaseStorage implements IStorage {
 
   // ---- Tenants ----
   async listTenants(propertyId: number) { return db.select().from(tenants).where(eq(tenants.propertyId, propertyId)).orderBy(tenants.id); }
+  async listAllTenants() { return db.select().from(tenants).orderBy(tenants.id); }
   async createTenant(data: InsertTenant) { return one(await db.insert(tenants).values({ ...data, createdAt: now() }).returning())!; }
   async updateTenant(id: number, data: Partial<InsertTenant>) {
     return one(await db.update(tenants).set(data).where(eq(tenants.id, id)).returning());
@@ -227,6 +236,17 @@ export class DatabaseStorage implements IStorage {
   async createStatementEmail(data: InsertStatementEmail) {
     return one(await db.insert(statementEmails).values({ ...data, sentAt: now() }).returning())!;
   }
+
+  // ---- Bank reconciliations ----
+  async listReconciliations() { return db.select().from(bankReconciliations).orderBy(desc(bankReconciliations.id)); }
+  async getReconciliation(id: number) { return one(await db.select().from(bankReconciliations).where(eq(bankReconciliations.id, id))); }
+  async createReconciliation(data: InsertBankReconciliation) {
+    return one(await db.insert(bankReconciliations).values({ ...data, createdAt: now() }).returning())!;
+  }
+  async updateReconciliation(id: number, data: Partial<InsertBankReconciliation>) {
+    return one(await db.update(bankReconciliations).set(data).where(eq(bankReconciliations.id, id)).returning());
+  }
+  async deleteReconciliation(id: number) { return (await db.delete(bankReconciliations).where(eq(bankReconciliations.id, id)).returning()).length > 0; }
 }
 
 export const storage = new DatabaseStorage();

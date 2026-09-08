@@ -16,6 +16,7 @@ import UtilitiesHub from "@/pages/UtilitiesHub";
 import Finance from "@/pages/Finance";
 import Statements from "@/pages/Statements";
 import SendStatements from "@/pages/SendStatements";
+import Reconciliation from "@/pages/Reconciliation";
 import StatementEditor from "@/pages/StatementEditor";
 import StatementPrint from "@/pages/StatementPrint";
 import WorkOrder from "@/pages/WorkOrder";
@@ -33,6 +34,7 @@ function AppRouter() {
       <Route path="/finance" component={Finance} />
       <Route path="/statements" component={Statements} />
       <Route path="/send" component={SendStatements} />
+      <Route path="/reconciliation" component={Reconciliation} />
       <Route path="/new/:propertyId" component={StatementEditor} />
       <Route path="/edit/:id" component={StatementEditor} />
       <Route path="/print/:id" component={StatementPrint} />

@@ -296,6 +296,62 @@ function parseTenancy(raw: string): TenancyExtract {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Bank statement transaction extraction (CSV / PDF text / image)
+// The model ONLY extracts raw transactions. NI-number matching to tenants is
+// done deterministically in code (never trust the model with the money math).
+// ---------------------------------------------------------------------------
+export interface ExtractedTxn { date: string; description: string; reference: string; amount: number; }
+
+const BANK_SYSTEM = `You are a precise UK bank-statement parser. You extract every transaction line exactly as printed. You never invent, merge, skip or re-order transactions. Amounts must be exact. Credits (money in) are positive; debits (money out) are negative.`;
+
+export async function extractBankTransactions(opts: {
+  text?: string; imageBase64?: string; imageMime?: string;
+}): Promise<ExtractedTxn[]> {
+  const client = makeClient();
+  const promptText = `Extract EVERY transaction from this bank statement. Return ONLY a JSON object:
+{
+  "transactions": [
+    { "date": "date as printed", "description": "full narrative/payee/reference text exactly as shown", "reference": "any payment reference in the narrative (Universal Credit refs often contain a National Insurance number like AB123456C)", "amount": number (money IN = positive, money OUT = negative) }
+  ]
+}
+Rules:
+- Include ALL lines, both credits and debits.
+- amount is a plain number in GBP (e.g. 922.48 or -49.00). No currency symbols or commas.
+- Put the whole narrative in "description". If a reference/NI number is embedded, also copy it into "reference".
+- Do not summarise or omit any row.`;
+  let input: any;
+  if (opts.imageBase64) {
+    input = [{ role: "user", content: [ { type: "input_text", text: promptText + "\n\n(see attached image of the statement)" }, { type: "input_image", image_url: `data:${opts.imageMime || "image/jpeg"};base64,${opts.imageBase64}` } ] }];
+  } else {
+    input = `${promptText}\n\nStatement content:\n"""\n${(opts.text || "").slice(0, 40000)}\n"""`;
+  }
+  const response = await client.responses.create({ model: process.env.OPENAI_MODEL || "gpt-4o", instructions: BANK_SYSTEM, input });
+  const raw = (response as any).output_text ?? "";
+  return parseTxns(raw);
+}
+
+function parseTxns(raw: string): ExtractedTxn[] {
+  if (!raw) return [];
+  let s = raw.trim();
+  const fence = s.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (fence) s = fence[1].trim();
+  const a = s.indexOf("{"), b = s.lastIndexOf("}");
+  if (a >= 0 && b > a) s = s.slice(a, b + 1);
+  try {
+    const o = JSON.parse(s);
+    const list = Array.isArray(o.transactions) ? o.transactions : [];
+    return list.map((t: any) => ({
+      date: typeof t?.date === "string" ? t.date : "",
+      description: typeof t?.description === "string" ? t.description : "",
+      reference: typeof t?.reference === "string" ? t.reference : "",
+      amount: Number.isFinite(Number(t?.amount)) ? Number(t.amount) : 0,
+    })).filter((t: ExtractedTxn) => t.description || t.amount);
+  } catch {
+    return [];
+  }
+}
+
 function parseReview(raw: string): CertReview {
   const fallback: CertReview = {
     outcome: "unknown", summary: "Could not interpret the document.",

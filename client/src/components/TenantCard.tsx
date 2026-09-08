@@ -103,10 +103,11 @@ export function TenantCard({ propertyId, tenant, rooms = [], isMultiRoom = false
               <Input value={t.phone} data-testid={`input-phone-${tenant.id}`} onChange={(e) => set({ phone: e.target.value })} placeholder="07…" />
             </div>
             <div className="space-y-1.5">
-              <Label className={labelCls}>Monthly rent (£)</Label>
+              <Label className={labelCls}>Actual monthly rent (£)</Label>
               <Input type="number" step="0.01" value={t.monthlyRent === 0 ? "" : penceToPounds(t.monthlyRent)} placeholder="0.00"
                 data-testid={`input-rent-${tenant.id}`}
                 onChange={(e) => set({ monthlyRent: e.target.value === "" ? 0 : poundsToPence(parseFloat(e.target.value) || 0) })} />
+              <p className="text-[11px] text-muted-foreground">The true rent for this flat — used on statements and bank reconciliation.</p>
             </div>
             <div className="space-y-1.5">
               <Label className={labelCls}>Tenancy start</Label>

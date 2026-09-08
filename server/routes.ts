@@ -6,8 +6,16 @@ import {
   insertStatementSchema, insertPropertySchema, insertTenantSchema,
 } from "@shared/schema";
 import type { RentalRow, DisbursementRow } from "@shared/schema";
-import { reviewCertificate, troubleshootMaintenance, extractTenancy } from "./aiCert";
+import { reviewCertificate, troubleshootMaintenance, extractTenancy, extractBankTransactions } from "./aiCert";
+import type { ExtractedTxn } from "./aiCert";
 import { sendGraphMail, graphConfigStatus } from "./graphMail";
+import type { BankTxn, ReconLedgerRow } from "@shared/schema";
+
+// Normalise a National Insurance number for matching: strip all non-alphanumerics
+// and uppercase. "AB 12 34 56 C" and "ab123456c" both become "AB123456C".
+function normaliseNi(s: string): string {
+  return (s || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+}
 
 function parseRows(json: string): RentalRow[] {
   try { return JSON.parse(json) as RentalRow[]; } catch { return []; }
@@ -771,6 +779,177 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       } as any);
       res.status(502).json({ message: msg });
     }
+  });
+
+  // All tenants across all properties (for reconciliation assign dropdown)
+  app.get("/api/tenants-all", async (_req, res) => {
+    res.json(await storage.listAllTenants());
+  });
+
+  // =========================================================================
+  // BANK RECONCILIATION — upload a UC bank statement, match payments to tenants
+  // by their National Insurance number, and build a paid/not-paid ledger.
+  // =========================================================================
+
+  // List all reconciliations (metadata only — omit heavy JSON blobs for speed)
+  app.get("/api/reconciliations", async (_req, res) => {
+    const list = await storage.listReconciliations();
+    res.json(list.map(({ transactions, ledger, unmatched, ...rest }) => rest));
+  });
+  // Full reconciliation with ledger
+  app.get("/api/reconciliations/:id", async (req, res) => {
+    const r = await storage.getReconciliation(Number(req.params.id));
+    if (!r) return res.status(404).json({ message: "Reconciliation not found" });
+    res.json(r);
+  });
+  app.delete("/api/reconciliations/:id", async (req, res) => {
+    const ok = await storage.deleteReconciliation(Number(req.params.id));
+    if (!ok) return res.status(404).json({ message: "Not found" });
+    res.status(204).end();
+  });
+
+  // Given a list of extracted transactions, match credits to tenants by NI number
+  // and build the ledger. Shared by the upload route and manual re-assign.
+  async function buildLedger(txns: BankTxn[]): Promise<{ ledger: ReconLedgerRow[]; unmatched: BankTxn[]; totalCredits: number; matchedCredits: number; }> {
+    const tenants = await storage.listAllTenants();
+    const props = await storage.listProperties();
+    const propAddr = new Map(props.map((p) => [p.id, p.propertyAddress]));
+
+    // Build NI -> tenant index (only tenants that have an NI number)
+    const byNi = new Map<string, typeof tenants[number]>();
+    for (const t of tenants) {
+      const ni = normaliseNi(t.niNumber);
+      if (ni) byNi.set(ni, t);
+    }
+
+    // Seed a ledger row for every tenant (so unpaid ones show too)
+    const rowByTenant = new Map<number, ReconLedgerRow>();
+    for (const t of tenants) {
+      rowByTenant.set(t.id, {
+        tenantId: t.id,
+        tenantName: t.tenantName,
+        flat: t.flat,
+        propertyAddress: propAddr.get(t.propertyId) || "",
+        niNumber: t.niNumber,
+        expectedRent: round2((t.monthlyRent || 0) / 100),
+        amountReceived: 0,
+        shortfall: 0,
+        status: "unpaid",
+        matchedTxns: [],
+      });
+    }
+
+    const unmatched: BankTxn[] = [];
+    let totalCredits = 0;
+    let matchedCredits = 0;
+
+    for (const txn of txns) {
+      if (txn.amount <= 0) continue; // only credits (money in)
+      totalCredits += txn.amount;
+      // Search the whole narrative + reference for any tenant's NI number.
+      const hay = normaliseNi(`${txn.reference} ${txn.description}`);
+      let matched: typeof tenants[number] | undefined;
+      for (const [ni, t] of Array.from(byNi.entries())) {
+        if (ni.length >= 8 && hay.includes(ni)) { matched = t; break; }
+      }
+      if (matched) {
+        const row = rowByTenant.get(matched.id)!;
+        row.amountReceived = round2(row.amountReceived + txn.amount);
+        row.matchedTxns.push(txn);
+        matchedCredits += txn.amount;
+      } else {
+        unmatched.push(txn);
+      }
+    }
+
+    // Finalise each row's shortfall + status
+    const ledger = Array.from(rowByTenant.values()).map((row) => {
+      const shortfall = round2(row.expectedRent - row.amountReceived);
+      let status: ReconLedgerRow["status"] = "unpaid";
+      if (row.amountReceived <= 0) status = "unpaid";
+      else if (shortfall > 0.005) status = "partial";
+      else status = "paid";
+      return { ...row, shortfall, status };
+    });
+    // Order: unpaid first, then partial, then paid; then by property/flat
+    const rank = { unpaid: 0, partial: 1, paid: 2 } as const;
+    ledger.sort((a, b) => rank[a.status] - rank[b.status] || a.propertyAddress.localeCompare(b.propertyAddress) || a.flat.localeCompare(b.flat));
+
+    return { ledger, unmatched, totalCredits: round2(totalCredits), matchedCredits: round2(matchedCredits) };
+  }
+
+  // Upload + parse + match. Accepts either { csvText } (CSV pasted/read) or a
+  // base64 file (PDF/image) via { fileBase64, mimeType, fileName }.
+  app.post("/api/reconciliations", async (req, res) => {
+    const { label, periodMonth, fileName, csvText, fileBase64, mimeType } = req.body || {};
+    try {
+      let extracted: ExtractedTxn[] = [];
+      if (csvText && String(csvText).trim()) {
+        extracted = await extractBankTransactions({ text: String(csvText) });
+      } else if (fileBase64) {
+        const mime = String(mimeType || "");
+        if (mime.startsWith("image/")) {
+          extracted = await extractBankTransactions({ imageBase64: String(fileBase64), imageMime: mime });
+        } else {
+          // PDF or text-ish: decode to text and let the model read it. For PDFs the
+          // raw bytes as latin1 still expose enough text lines for extraction; if
+          // that yields nothing, fall back to sending as an image is not possible
+          // here, so we rely on the decoded text.
+          const decoded = Buffer.from(String(fileBase64), "base64").toString("latin1");
+          extracted = await extractBankTransactions({ text: decoded });
+        }
+      } else {
+        return res.status(400).json({ message: "Provide a CSV or a file to reconcile." });
+      }
+
+      const txns: BankTxn[] = extracted.map((t) => ({ date: t.date, description: t.description, reference: t.reference, amount: t.amount }));
+      const { ledger, unmatched, totalCredits, matchedCredits } = await buildLedger(txns);
+
+      const saved = await storage.createReconciliation({
+        label: label || "",
+        fileName: fileName || "",
+        periodMonth: periodMonth || "",
+        transactions: JSON.stringify(txns),
+        ledger: JSON.stringify(ledger),
+        unmatched: JSON.stringify(unmatched),
+        totalCredits: Math.round(totalCredits * 100),
+        matchedCredits: Math.round(matchedCredits * 100),
+      } as any);
+      res.json(saved);
+    } catch (e: any) {
+      res.status(500).json({ message: e?.message || "Failed to reconcile the statement." });
+    }
+  });
+
+  // Manually assign an unmatched transaction to a tenant, then rebuild the ledger.
+  app.post("/api/reconciliations/:id/assign", async (req, res) => {
+    const rec = await storage.getReconciliation(Number(req.params.id));
+    if (!rec) return res.status(404).json({ message: "Not found" });
+    const { txnIndex, tenantId } = req.body || {};
+    let unmatched: BankTxn[] = [];
+    try { unmatched = JSON.parse(rec.unmatched); } catch { unmatched = []; }
+    const idx = Number(txnIndex);
+    if (!(idx >= 0 && idx < unmatched.length)) return res.status(400).json({ message: "Invalid transaction." });
+    const tenant = (await storage.listAllTenants()).find((t) => t.id === Number(tenantId));
+    if (!tenant) return res.status(400).json({ message: "Invalid tenant." });
+
+    // Tag the transaction's reference with the tenant's NI so a rebuild matches it,
+    // then re-run the full match over all transactions.
+    const allTxns: BankTxn[] = (() => { try { return JSON.parse(rec.transactions); } catch { return []; } })();
+    const target = unmatched[idx];
+    const tagged = allTxns.map((t) => (t.date === target.date && t.description === target.description && t.amount === target.amount)
+      ? { ...t, reference: `${t.reference} ${tenant.niNumber}`.trim() }
+      : t);
+
+    const { ledger, unmatched: newUnmatched, totalCredits, matchedCredits } = await buildLedger(tagged);
+    const updated = await storage.updateReconciliation(rec.id, {
+      transactions: JSON.stringify(tagged),
+      ledger: JSON.stringify(ledger),
+      unmatched: JSON.stringify(newUnmatched),
+      totalCredits: Math.round(totalCredits * 100),
+      matchedCredits: Math.round(matchedCredits * 100),
+    } as any);
+    res.json(updated);
   });
 
   return httpServer;

@@ -394,6 +394,49 @@ export const insertStatementEmailSchema = createInsertSchema(statementEmails).om
 export type InsertStatementEmail = z.infer<typeof insertStatementEmailSchema>;
 export type StatementEmail = typeof statementEmails.$inferSelect;
 
+// ---------------------------------------------------------------------------
+// BANK RECONCILIATIONS — an uploaded bank statement, parsed into transactions
+// and matched to tenants by their National Insurance number (UC payment ref).
+// The ledger (per-tenant paid/not-paid + matched payments + unmatched rows)
+// is stored as JSON for flexibility.
+// ---------------------------------------------------------------------------
+export const bankReconciliations = pgTable("bank_reconciliations", {
+  id: serial("id").primaryKey(),
+  label: text("label").notNull().default(""),          // e.g. "July 2026 UC"
+  fileName: text("file_name").notNull().default(""),
+  periodMonth: text("period_month").notNull().default(""), // YYYY-MM the statement covers
+  transactions: text("transactions").notNull().default("[]"), // JSON: all parsed txns
+  ledger: text("ledger").notNull().default("[]"),            // JSON: per-tenant matched result
+  unmatched: text("unmatched").notNull().default("[]"),      // JSON: credit txns not matched to a tenant
+  totalCredits: integer("total_credits_pence").notNull().default(0),
+  matchedCredits: integer("matched_credits_pence").notNull().default(0),
+  createdAt: text("created_at").notNull(),
+});
+export const insertBankReconciliationSchema = createInsertSchema(bankReconciliations).omit({ id: true, createdAt: true });
+export type InsertBankReconciliation = z.infer<typeof insertBankReconciliationSchema>;
+export type BankReconciliation = typeof bankReconciliations.$inferSelect;
+
+// A single parsed bank transaction
+export interface BankTxn {
+  date: string;        // as printed on the statement
+  description: string; // full narrative / reference text
+  reference: string;   // extracted reference (may contain the NI number)
+  amount: number;      // pounds, positive = credit in, negative = debit out
+}
+// A matched tenant row in the reconciliation ledger
+export interface ReconLedgerRow {
+  tenantId: number | null;
+  tenantName: string;
+  flat: string;
+  propertyAddress: string;
+  niNumber: string;
+  expectedRent: number;   // pounds
+  amountReceived: number; // pounds (sum of matched credits)
+  shortfall: number;      // pounds (expected - received; negative if overpaid)
+  status: "paid" | "partial" | "unpaid";
+  matchedTxns: BankTxn[];
+}
+
 // Keep template users table
 export const users = pgTable("users", {
   id: serial("id").primaryKey(),
