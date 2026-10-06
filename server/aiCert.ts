@@ -305,30 +305,129 @@ export interface ExtractedTxn { date: string; description: string; reference: st
 
 const BANK_SYSTEM = `You are a precise UK bank-statement parser. You extract every transaction line exactly as printed. You never invent, merge, skip or re-order transactions. Amounts must be exact. Credits (money in) are positive; debits (money out) are negative.`;
 
+// ---- Deterministic CSV parser (no AI) -------------------------------------
+function splitCsvLine(line: string, delim: string): string[] {
+  const out: string[] = []; let cur = ""; let q = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (ch === '"') { if (q && line[i + 1] === '"') { cur += '"'; i++; } else q = !q; }
+    else if (ch === delim && !q) { out.push(cur); cur = ""; }
+    else cur += ch;
+  }
+  out.push(cur);
+  return out.map((c) => c.trim());
+}
+function money(v: string): number | null {
+  if (v == null) return null;
+  let t = String(v).replace(/[\u00a3$,\s]/g, "");
+  if (!t) return null;
+  let neg = false;
+  if (/^\(.*\)$/.test(t)) { neg = true; t = t.slice(1, -1); }
+  if (/CR$/i.test(t)) t = t.replace(/CR$/i, "");
+  if (/DR$/i.test(t)) { neg = true; t = t.replace(/DR$/i, ""); }
+  const n = Number(t);
+  if (!Number.isFinite(n)) return null;
+  return neg ? -Math.abs(n) : n;
+}
+export function parseBankCsv(text: string): ExtractedTxn[] | null {
+  const lines = text.split(/\r?\n/).filter((l) => l.trim());
+  if (lines.length < 2) return null;
+  // Find a header row in the first 15 lines
+  for (let h = 0; h < Math.min(15, lines.length); h++) {
+    const delim = [",", ";", "\t", "|"].sort((a, b) => lines[h].split(b).length - lines[h].split(a).length)[0];
+    const cols = splitCsvLine(lines[h], delim).map((c) => c.toLowerCase());
+    const find = (re: RegExp) => cols.findIndex((c) => re.test(c));
+    const iDate = find(/date/);
+    const iDesc = find(/desc|narrative|details|payee|memo|transaction|particular|name/);
+    const iRef = find(/ref/);
+    const iAmt = find(/^amount|^value|amount/);
+    const iIn = find(/paid in|money in|credit|receipt|deposit|\bin\b/);
+    const iOut = find(/paid out|money out|debit|withdrawal|payment|\bout\b/);
+    if (iDate < 0 || (iAmt < 0 && iIn < 0)) continue;
+    const out: ExtractedTxn[] = [];
+    for (const line of lines.slice(h + 1)) {
+      const c = splitCsvLine(line, delim);
+      let amount: number | null = null;
+      if (iIn >= 0 && iIn !== iAmt) {
+        const inn = money(c[iIn]); const o = iOut >= 0 ? money(c[iOut]) : null;
+        if (inn && inn !== 0) amount = Math.abs(inn);
+        else if (o && o !== 0) amount = -Math.abs(o);
+      }
+      if (amount == null && iAmt >= 0) amount = money(c[iAmt]);
+      if (amount == null || amount === 0) continue;
+      const description = [iDesc >= 0 ? c[iDesc] : "", iRef >= 0 && iRef !== iDesc ? c[iRef] : ""].filter(Boolean).join(" ");
+      out.push({ date: c[iDate] || "", description: description || c.join(" "), reference: iRef >= 0 ? (c[iRef] || "") : "", amount });
+    }
+    if (out.length) return out;
+  }
+  return null;
+}
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+// One AI call with retry on rate limits (429).
+async function aiExtractChunk(client: OpenAI, input: any, model: string): Promise<ExtractedTxn[]> {
+  for (let attempt = 0; attempt < 5; attempt++) {
+    try {
+      const response = await client.responses.create({ model, instructions: BANK_SYSTEM, input });
+      return parseTxns((response as any).output_text ?? "");
+    } catch (e: any) {
+      const msg = String(e?.message || "");
+      const status = e?.status;
+      if (status === 429 || /rate limit|429|Request too large/i.test(msg)) {
+        const m = msg.match(/try again in ([\d.]+)\s*(ms|s)/i);
+        const wait = m ? Number(m[1]) * (m[2].toLowerCase() === "ms" ? 1 : 1000) + 500 : 15000 * (attempt + 1);
+        await sleep(Math.min(wait, 60000));
+        continue;
+      }
+      throw e;
+    }
+  }
+  throw new Error("The AI service is busy (rate limit). Please try again in a minute, or upload a CSV export which is read instantly without AI.");
+}
+
 export async function extractBankTransactions(opts: {
   text?: string; imageBase64?: string; imageMime?: string;
 }): Promise<ExtractedTxn[]> {
-  const client = makeClient();
-  const promptText = `Extract EVERY transaction from this bank statement. Return ONLY a JSON object:
-{
-  "transactions": [
-    { "date": "date as printed", "description": "full narrative/payee/reference text exactly as shown", "reference": "any payment reference in the narrative (Universal Credit refs often contain a National Insurance number like AB123456C)", "amount": number (money IN = positive, money OUT = negative) }
-  ]
-}
-Rules:
-- Include ALL lines, both credits and debits.
-- amount is a plain number in GBP (e.g. 922.48 or -49.00). No currency symbols or commas.
-- Put the whole narrative in "description". If a reference/NI number is embedded, also copy it into "reference".
-- Do not summarise or omit any row.`;
-  let input: any;
-  if (opts.imageBase64) {
-    input = [{ role: "user", content: [ { type: "input_text", text: promptText + "\n\n(see attached image of the statement)" }, { type: "input_image", image_url: `data:${opts.imageMime || "image/jpeg"};base64,${opts.imageBase64}` } ] }];
-  } else {
-    input = `${promptText}\n\nStatement content:\n"""\n${(opts.text || "").slice(0, 40000)}\n"""`;
+  // 1) CSV / tabular text: parse deterministically, no AI needed.
+  if (opts.text) {
+    const csv = parseBankCsv(opts.text);
+    if (csv && csv.length) return csv;
   }
-  const response = await client.responses.create({ model: process.env.OPENAI_MODEL || "gpt-4o", instructions: BANK_SYSTEM, input });
-  const raw = (response as any).output_text ?? "";
-  return parseTxns(raw);
+
+  const client = makeClient();
+  const promptText = `Extract EVERY transaction from this bank statement excerpt. Return ONLY a JSON object:
+{ "transactions": [ { "date": "date as printed", "description": "full narrative/payee/reference text exactly as shown", "reference": "any payment reference (Universal Credit refs often contain a National Insurance number like AB123456C)", "amount": number (money IN positive, money OUT negative) } ] }
+Rules: include ALL transaction lines; amount is a plain number (no symbols/commas); ignore balances, headers, page footers and summary totals.`;
+
+  // 2) Image: vision call (single).
+  if (opts.imageBase64) {
+    const input = [{ role: "user", content: [ { type: "input_text", text: promptText }, { type: "input_image", image_url: `data:${opts.imageMime || "image/jpeg"};base64,${opts.imageBase64}` } ] }];
+    return aiExtractChunk(client, input, process.env.OPENAI_MODEL || "gpt-4o");
+  }
+
+  // 3) Free text (PDF text): keep only lines that look like transactions,
+  //    then send in small chunks so each request stays well under rate limits.
+  const lines = (opts.text || "").split(/\r?\n/).map((l) => l.replace(/\s+/g, " ").trim()).filter(Boolean);
+  const moneyRe = /\d[\d,]*\.\d{2}/;
+  const kept = lines.filter((l) => moneyRe.test(l));
+  const source = kept.length ? kept : lines;
+  const CHUNK = 6000; // ~2k tokens per request
+  const chunks: string[] = [];
+  let cur = "";
+  for (const l of source) {
+    if (cur.length + l.length + 1 > CHUNK && cur) { chunks.push(cur); cur = ""; }
+    cur += l + "\n";
+  }
+  if (cur) chunks.push(cur);
+
+  const model = process.env.OPENAI_BANK_MODEL || "gpt-4o-mini";
+  const all: ExtractedTxn[] = [];
+  for (const ch of chunks) {
+    const res = await aiExtractChunk(client, `${promptText}\n\nStatement lines:\n"""\n${ch}\n"""`, model);
+    all.push(...res);
+  }
+  return all;
 }
 
 function parseTxns(raw: string): ExtractedTxn[] {

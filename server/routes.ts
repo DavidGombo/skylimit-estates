@@ -897,15 +897,24 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         extracted = await extractBankTransactions({ text: String(csvText) });
       } else if (fileBase64) {
         const mime = String(mimeType || "");
+        const name = String(fileName || "").toLowerCase();
+        const buf = Buffer.from(String(fileBase64), "base64");
         if (mime.startsWith("image/")) {
           extracted = await extractBankTransactions({ imageBase64: String(fileBase64), imageMime: mime });
+        } else if (mime.includes("pdf") || name.endsWith(".pdf")) {
+          // Read the PDF's real text layer (not raw bytes) so the AI gets clean, small input.
+          const { PDFParse } = await import("pdf-parse");
+          const parser = new PDFParse({ data: buf });
+          const parsed = await parser.getText();
+          await parser.destroy().catch(() => {});
+          const text = ((parsed as any).text || "").trim();
+          if (!text) {
+            return res.status(422).json({ message: "This PDF has no readable text (it looks like a scan). Please upload the CSV export from online banking, or a screenshot image of the statement." });
+          }
+          extracted = await extractBankTransactions({ text });
         } else {
-          // PDF or text-ish: decode to text and let the model read it. For PDFs the
-          // raw bytes as latin1 still expose enough text lines for extraction; if
-          // that yields nothing, fall back to sending as an image is not possible
-          // here, so we rely on the decoded text.
-          const decoded = Buffer.from(String(fileBase64), "base64").toString("latin1");
-          extracted = await extractBankTransactions({ text: decoded });
+          // CSV / TXT / other text exports
+          extracted = await extractBankTransactions({ text: buf.toString("utf8") });
         }
       } else {
         return res.status(400).json({ message: "Provide a CSV or a file to reconcile." });
