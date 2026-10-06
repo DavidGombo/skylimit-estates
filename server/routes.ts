@@ -16,6 +16,10 @@ import type { BankTxn, ReconLedgerRow } from "@shared/schema";
 function normaliseNi(s: string): string {
   return (s || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
 }
+// The payer/narrative part of a bank line, before any "ref:" section.
+function payerName(desc: string): string {
+  return (desc || "").split(/\bref\b\s*:?/i)[0].trim();
+}
 
 function parseRows(json: string): RentalRow[] {
   try { return JSON.parse(json) as RentalRow[]; } catch { return []; }
@@ -229,7 +233,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       "flat", "tenantName", "monthlyRent", "active", "roomId",
       "email", "phone", "tenancyStart", "tenancyEnd",
       "depositAmount", "depositScheme", "idReference", "niNumber", "notes",
-      "rentPeriodStart", "rentPeriodEnd",
+      "rentPeriodStart", "rentPeriodEnd", "bankRefAliases",
     ] as const);
     const patch: Record<string, unknown> = {};
     for (const k of allowed) if (k in req.body) patch[k] = req.body[k];
@@ -830,6 +834,14 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const ni = normaliseNi(t.niNumber);
       if (ni) byNi.set(ni, t);
     }
+    // Learned payer-reference aliases (e.g. "F2 84A KINGSTON") -> tenant
+    const aliases: { key: string; t: typeof tenants[number] }[] = [];
+    for (const t of tenants) {
+      let list: string[] = [];
+      try { list = JSON.parse((t as any).bankRefAliases || "[]"); } catch { list = []; }
+      for (const a of list) { const k = normaliseNi(a); if (k.length >= 4) aliases.push({ key: k, t }); }
+    }
+    aliases.sort((a, b) => b.key.length - a.key.length); // most specific first
 
     // Seed a ledger row for every tenant (so unpaid ones show too)
     const rowByTenant = new Map<number, ReconLedgerRow>();
@@ -860,6 +872,12 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       let matched: typeof tenants[number] | undefined;
       for (const [ni, t] of Array.from(byNi.entries())) {
         if (ni.length >= 8 && hay.includes(ni)) { matched = t; break; }
+      }
+      if (!matched) {
+        const payer = normaliseNi(payerName(txn.description));
+        for (const a of aliases) {
+          if (payer === a.key || (payer && payer.startsWith(a.key)) || hay.includes(a.key)) { matched = a.t; break; }
+        }
       }
       if (matched) {
         const row = rowByTenant.get(matched.id)!;
@@ -939,6 +957,20 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
+  // Re-run matching on a saved reconciliation (e.g. after adding NI numbers or aliases).
+  app.post("/api/reconciliations/:id/rematch", async (req, res) => {
+    const rec = await storage.getReconciliation(Number(req.params.id));
+    if (!rec) return res.status(404).json({ message: "Not found" });
+    let txns: BankTxn[] = [];
+    try { txns = JSON.parse(rec.transactions); } catch { txns = []; }
+    const { ledger, unmatched, totalCredits, matchedCredits } = await buildLedger(txns);
+    const updated = await storage.updateReconciliation(rec.id, {
+      ledger: JSON.stringify(ledger), unmatched: JSON.stringify(unmatched),
+      totalCredits: Math.round(totalCredits * 100), matchedCredits: Math.round(matchedCredits * 100),
+    } as any);
+    res.json(updated);
+  });
+
   // Manually assign an unmatched transaction to a tenant, then rebuild the ledger.
   app.post("/api/reconciliations/:id/assign", async (req, res) => {
     const rec = await storage.getReconciliation(Number(req.params.id));
@@ -959,6 +991,18 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       ? { ...t, reference: `${t.reference} ${tenant.niNumber}`.trim() }
       : t);
 
+    // Learn: save this payer name as an alias on the tenant so future statements auto-match.
+    if (req.body?.remember !== false) {
+      const payer = payerName(target.description);
+      if (payer && normaliseNi(payer).length >= 4 && normaliseNi(payer) !== normaliseNi(tenant.niNumber)) {
+        let list: string[] = [];
+        try { list = JSON.parse((tenant as any).bankRefAliases || "[]"); } catch { list = []; }
+        if (!list.some((x) => normaliseNi(x) === normaliseNi(payer))) {
+          list.push(payer);
+          await storage.updateTenant(tenant.id, { bankRefAliases: JSON.stringify(list) } as any);
+        }
+      }
+    }
     const { ledger, unmatched: newUnmatched, totalCredits, matchedCredits } = await buildLedger(tagged);
     const updated = await storage.updateReconciliation(rec.id, {
       transactions: JSON.stringify(tagged),

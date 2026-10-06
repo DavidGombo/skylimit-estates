@@ -176,13 +176,18 @@ function ReconciliationDetail({ id, onBack }: { id: number; onBack: () => void }
   const { data: rec, isLoading } = useQuery<BankReconciliation>({ queryKey: ["/api/reconciliations", id], queryFn: async () => (await apiRequest("GET", `/api/reconciliations/${id}`)).json() });
   const { data: tenants } = useQuery<Tenant[]>({ queryKey: ["/api/tenants-all"], queryFn: async () => (await apiRequest("GET", "/api/tenants-all")).json() });
 
+  const rematch = useMutation({
+    mutationFn: async () => (await apiRequest("POST", `/api/reconciliations/${id}/rematch`)).json(),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/reconciliations", id] }); queryClient.invalidateQueries({ queryKey: ["/api/reconciliations"] }); toast({ title: "Matching re-run", description: "Using the latest NI numbers and saved payer references." }); },
+    onError: (e: any) => toast({ title: "Could not re-run", description: e?.message, variant: "destructive" }),
+  });
   const [assignFor, setAssignFor] = useState<number | null>(null);
   const [assignTenant, setAssignTenant] = useState<string>("");
 
   const assign = useMutation({
     mutationFn: async ({ txnIndex, tenantId }: { txnIndex: number; tenantId: number }) =>
       (await apiRequest("POST", `/api/reconciliations/${id}/assign`, { txnIndex, tenantId })).json(),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/reconciliations", id] }); setAssignFor(null); setAssignTenant(""); toast({ title: "Payment assigned" }); },
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/reconciliations", id] }); queryClient.invalidateQueries({ queryKey: ["/api/tenants-all"] }); setAssignFor(null); setAssignTenant(""); toast({ title: "Payment assigned" }); },
     onError: (e: any) => toast({ title: "Could not assign", description: e?.message, variant: "destructive" }),
   });
 
@@ -204,6 +209,9 @@ function ReconciliationDetail({ id, onBack }: { id: number; onBack: () => void }
         <Landmark className="h-5 w-5 text-primary" />
         <h2 className="text-lg font-semibold">{rec.label || rec.fileName || "Reconciliation"}</h2>
         {rec.periodMonth && <span className="text-xs px-2 py-0.5 rounded-full bg-secondary text-secondary-foreground">{rec.periodMonth}</span>}
+        <Button variant="outline" size="sm" className="ml-auto" data-testid="button-rematch" disabled={rematch.isPending} onClick={() => rematch.mutate()}>
+          {rematch.isPending ? <><Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> Matching…</> : "Re-run matching"}
+        </Button>
       </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
@@ -278,7 +286,7 @@ function ReconciliationDetail({ id, onBack }: { id: number; onBack: () => void }
                         </DialogTrigger>
                         <DialogContent>
                           <DialogHeader><DialogTitle>Assign payment to a tenant</DialogTitle>
-                            <DialogDescription>{t.date} · {gbp(t.amount)} — {t.description}</DialogDescription></DialogHeader>
+                            <DialogDescription>{t.date} · {gbp(t.amount)} — {t.description}<br /><span className="text-[12px]">The payer name will be remembered for this tenant, so future statements match it automatically.</span></DialogDescription></DialogHeader>
                           <Select value={assignTenant} onValueChange={setAssignTenant}>
                             <SelectTrigger data-testid="select-assign-tenant"><SelectValue placeholder="Choose tenant" /></SelectTrigger>
                             <SelectContent>

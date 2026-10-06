@@ -79,6 +79,7 @@ export const tenants = pgTable("tenants", {
   depositScheme: text("deposit_scheme").notNull().default(""), // DPS / MyDeposits / TDS
   idReference: text("id_reference").notNull().default(""), // passport/right-to-rent ref
   niNumber: text("ni_number").notNull().default(""), // National Insurance number (from tenancy agreement)
+  bankRefAliases: text("bank_ref_aliases").notNull().default("[]"), // JSON array of payer names/refs that identify this tenant's rent on bank statements
   notes: text("notes").notNull().default(""),
 
   // Rent-in-arrears period template. Each tenant's rent covers a fixed offset

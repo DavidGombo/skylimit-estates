@@ -22,6 +22,9 @@ export function TenantCard({ propertyId, tenant, rooms = [], isMultiRoom = false
   const [open, setOpen] = useState(false);
   const [t, setT] = useState<Tenant>(tenant);
   useEffect(() => { setT(tenant); }, [tenant]);
+  const refsFrom = (j: string) => { try { return (JSON.parse(j || "[]") as string[]).join(", "); } catch { return ""; } };
+  const [refsText, setRefsText] = useState(refsFrom(tenant.bankRefAliases));
+  useEffect(() => { setRefsText(refsFrom(tenant.bankRefAliases)); }, [tenant.bankRefAliases]);
 
   const save = useMutation({
     mutationFn: () => apiRequest("PUT", `/api/tenants/${tenant.id}`, {
@@ -29,6 +32,7 @@ export function TenantCard({ propertyId, tenant, rooms = [], isMultiRoom = false
       email: t.email, phone: t.phone, tenancyStart: t.tenancyStart, tenancyEnd: t.tenancyEnd,
       depositAmount: t.depositAmount, depositScheme: t.depositScheme, idReference: t.idReference, notes: t.notes,
       niNumber: t.niNumber, rentPeriodStart: t.rentPeriodStart, rentPeriodEnd: t.rentPeriodEnd,
+      bankRefAliases: t.bankRefAliases,
     }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/properties", propertyId, "tenants"] });
@@ -142,6 +146,16 @@ export function TenantCard({ propertyId, tenant, rooms = [], isMultiRoom = false
             <div className="space-y-1.5">
               <Label className={labelCls}>NI number</Label>
               <Input value={t.niNumber || ""} data-testid={`input-ni-${tenant.id}`} onChange={(e) => set({ niNumber: e.target.value.toUpperCase() })} placeholder="QQ 12 34 56 C" />
+            </div>
+            <div className="space-y-1.5">
+              <Label className={labelCls}>Bank payment references</Label>
+              <Input
+                value={refsText}
+                data-testid={`input-bankrefs-${tenant.id}`}
+                onChange={(e) => { setRefsText(e.target.value); set({ bankRefAliases: JSON.stringify(e.target.value.split(",").map((x) => x.trim()).filter(Boolean)) }); }}
+                placeholder="e.g. F2 84A KINGSTON"
+              />
+              <p className="text-[11px] text-muted-foreground">Payer names on bank statements that identify this tenant's rent (when there's no NI). Learned automatically when you assign a payment.</p>
             </div>
             <div className="space-y-1.5">
               <Label className={labelCls}>Rent period start (base)</Label>
